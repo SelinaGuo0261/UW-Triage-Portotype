@@ -1,0 +1,2165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UW Triage — Researcher Portal</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    /* Purple brand */
+    --purple-900: oklch(0.28 0.12 300);
+    --purple-800: oklch(0.36 0.14 300);
+    --purple-700: oklch(0.44 0.17 300);
+    --purple-600: oklch(0.52 0.19 300);
+    --purple-500: oklch(0.60 0.18 300);
+    --purple-200: oklch(0.90 0.05 300);
+    --purple-100: oklch(0.96 0.025 300);
+    --purple-50:  oklch(0.985 0.012 300);
+    /* Warm neutral greys */
+    --ink-900: oklch(0.18 0.01 280);
+    --ink-700: oklch(0.38 0.012 280);
+    --ink-500: oklch(0.58 0.012 280);
+    --ink-400: oklch(0.70 0.012 280);
+    --ink-300: oklch(0.86 0.008 280);
+    --ink-200: oklch(0.93 0.006 280);
+    --ink-100: oklch(0.97 0.005 280);
+    --ink-50:  oklch(0.99 0.003 280);
+    --canvas-bg: oklch(0.985 0.004 290);
+    /* Semantic aliases (keep old names working) */
+    --bg: var(--canvas-bg);
+    --surface: #ffffff;
+    --ink: var(--ink-900);
+    --ink-2: var(--ink-700);
+    --ink-3: var(--ink-500);
+    --hairline: var(--ink-200);
+    --hairline-2: var(--ink-300);
+    --accent: var(--purple-700);
+    /* Shared tokens */
+    --shadow-sm: 0 1px 2px rgba(40,20,70,0.06);
+    --shadow-md: 0 4px 16px -4px rgba(40,20,70,0.12), 0 2px 4px rgba(40,20,70,0.05);
+    --shadow-lg: 0 12px 40px -8px rgba(40,20,70,0.18), 0 4px 8px rgba(40,20,70,0.06);
+    --radius: 8px;
+    --radius-sm: 5px;
+    /* UW brand typography */
+    --font-headline:   'Encode Sans', sans-serif;
+    --font-subheading: 'Uni Sans Book', 'Open Sans', sans-serif;
+    --font-body:       'Open Sans', system-ui, sans-serif;
+    --font-mono:       'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; overflow-x: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--ink-900);
+    font-family: var(--font-body);
+    font-size: 13.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font-family: inherit; }
+  ::selection { background: var(--purple-200); }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar:horizontal { display: none; }
+  *::-webkit-scrollbar-thumb { background: var(--ink-300); border-radius: 4px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  .portal-shell {
+    --sidebar-w: 220px;
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    grid-template-areas: "topbar topbar" "leftnav main";
+    height: 100%;
+    overflow: hidden;
+    background: var(--canvas-bg);
+    color: var(--ink-900);
+    transition: grid-template-columns 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .researcher-sidebar {
+    grid-area: leftnav;
+    width: var(--sidebar-w);
+    background: white;
+    border-right: 1px solid var(--ink-200);
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    position: relative;
+    transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
+  }
+
+  .researcher-sidebar-main {
+    flex: 1;
+    padding: 10px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow: visible;
+  }
+
+  .researcher-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -6px;
+    width: 12px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 20;
+  }
+
+  .researcher-resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 44px;
+    border-radius: 999px;
+    background: transparent;
+    transition: background 0.12s, height 0.12s;
+  }
+
+  .researcher-sidebar:hover .researcher-resize-handle::before,
+  .researcher-resize-handle.dragging::before {
+    background: var(--ink-300);
+  }
+
+  .researcher-resize-handle.dragging::before {
+    height: 68px;
+    background: var(--purple-500);
+  }
+
+  .researcher-nav-item {
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 18px;
+    background: transparent;
+    color: var(--ink-700);
+    border: none;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    position: relative;
+    transition: background 120ms, color 120ms, padding 260ms cubic-bezier(0.22, 1, 0.36, 1), gap 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
+  }
+
+  .researcher-nav-item:hover { background: var(--ink-100); }
+  .researcher-nav-item.active {
+    background: var(--purple-50);
+    color: var(--purple-800);
+    border-left-color: var(--purple-700);
+    font-weight: 600;
+  }
+  .researcher-nav-item svg { flex-shrink: 0; }
+  .researcher-nav-item.active svg { color: var(--purple-700); }
+
+  .researcher-nav-label {
+    flex: 1;
+    display: inline-block;
+    max-width: 150px;
+    overflow: hidden;
+    white-space: nowrap;
+    transition: max-width 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
+  }
+
+  .researcher-sidebar-actions {
+    padding: 12px 0 14px;
+    border-top: 1px solid var(--ink-200);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .researcher-sidebar-actions .researcher-nav-item {
+    gap: 10px;
+    padding: 8px 18px;
+    border-left: none;
+  }
+
+  .researcher-sidebar-collapsed .researcher-nav-label {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .researcher-sidebar-collapsed .researcher-nav-item {
+    justify-content: center;
+    gap: 0;
+    padding-left: 0;
+    padding-right: 0;
+    border-left: 0;
+  }
+
+  .researcher-sidebar-collapsed .researcher-nav-item.active {
+    box-shadow: inset 2px 0 0 var(--purple-700);
+  }
+
+  .researcher-sidebar-collapsed .researcher-sidebar-actions {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .researcher-sidebar-collapsed .researcher-nav-item::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 5px 8px;
+    border-radius: 5px;
+    background: var(--ink-900);
+    color: white;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+    z-index: 40;
+    box-shadow: var(--shadow-md);
+  }
+
+  .researcher-sidebar-collapsed .researcher-nav-item:hover::after { opacity: 1; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <script type="text/babel">
+// ─────────────────────────────────────────────
+// shared.jsx — primitives, icons, contact data
+// ─────────────────────────────────────────────
+const { useState, useMemo, useEffect, useRef } = React;
+
+const Hairline = ({ style }) => (
+  <div style={{ height: 1, background: "var(--ink-200)", ...style }} />
+);
+
+const Mono = ({ children, style }) => (
+  <span style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", ...style }}>{children}</span>
+);
+
+const Pill = ({ children, tone = "neutral", style, onClick }) => {
+  const tones = {
+    neutral: { bg: "var(--ink-200)", fg: "var(--ink-700)", bd: "transparent" },
+    accent:  { bg: "var(--purple-100)", fg: "var(--purple-700)", bd: "transparent" },
+    success: { bg: "rgba(46,109,72,0.10)", fg: "#2E6D48", bd: "transparent" },
+    outline: { bg: "transparent", fg: "var(--ink-900)", bd: "var(--ink-200)" },
+    soft:    { bg: "var(--ink-100)", fg: "var(--ink-700)", bd: "transparent" },
+  };
+  const t = tones[tone];
+  return (
+    <span onClick={onClick} style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "3px 9px", borderRadius: 999,
+      background: t.bg, color: t.fg, border: `1px solid ${t.bd}`,
+      fontSize: 11, fontWeight: 500, letterSpacing: 0.1,
+      cursor: onClick ? "pointer" : "default",
+      ...style
+    }}>{children}</span>
+  );
+};
+
+const primaryBtn = {
+  display: "inline-flex", alignItems: "center", gap: 6,
+  padding: "7px 14px", borderRadius: 6,
+  background: "var(--purple-700)", color: "white", border: "none",
+  fontSize: 12.5, fontWeight: 600, cursor: "pointer", textDecoration: "none",
+  fontFamily: "inherit", letterSpacing: "-0.005em",
+};
+const ghostBtn = {
+  display: "inline-flex", alignItems: "center", gap: 6,
+  padding: "7px 14px", borderRadius: 6,
+  background: "white", color: "var(--ink-900)", border: "1px solid var(--ink-300)",
+  fontSize: 12.5, fontWeight: 500, cursor: "pointer",
+  fontFamily: "inherit",
+};
+const linkBtn = {
+  background: "none", border: "none", padding: 0,
+  color: "var(--purple-700)", fontSize: 12.5, fontWeight: 500,
+  cursor: "pointer", fontFamily: "inherit",
+  display: "inline-flex", alignItems: "center", gap: 6,
+};
+
+const Icon = {
+  Search: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <circle cx="6" cy="6" r="4.25" stroke="currentColor" strokeWidth="1.3"/>
+      <path d="M9.2 9.2L12 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
+  Arrow: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M3 7h8M7.5 3.5L11 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Back: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M11 7H3M6.5 10.5L3 7l3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Check: (p) => (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" {...p}>
+      <path d="M2.5 6.2l2.4 2.3L9.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Mail: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <rect x="1.5" y="3" width="11" height="8" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+      <path d="M2 4l5 3.5L12 4" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Phone: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M3 3.5C3 3 3.4 2.5 3.9 2.5h1.4c.4 0 .8.3.9.7l.5 1.7c.1.4 0 .8-.3 1l-.7.6c.7 1.3 1.7 2.3 3 3l.6-.7c.2-.3.6-.4 1-.3l1.7.5c.4.1.7.5.7.9v1.4c0 .5-.5.9-1 .9C5.4 12.2 1.8 8.6 3 3.5z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Pin: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M7 12.5c2.2-2.7 4-4.7 4-7a4 4 0 10-8 0c0 2.3 1.8 4.3 4 7z" stroke="currentColor" strokeWidth="1.2"/>
+      <circle cx="7" cy="5.5" r="1.4" stroke="currentColor" strokeWidth="1.2"/>
+    </svg>
+  ),
+  Doc: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M3 1.5h5l3 3V12c0 .3-.2.5-.5.5h-7.5c-.3 0-.5-.2-.5-.5V2c0-.3.2-.5.5-.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+      <path d="M8 1.5V4.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Download: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M7 1.5v8M3.5 6.5L7 10l3.5-3.5M2 12.5h10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Refresh: (p) => (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...p}>
+      <path d="M2 7a5 5 0 018.8-3.2M12 7a5 5 0 01-8.8 3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <path d="M11 1.5v2.7H8.3M3 12.5V9.8h2.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Chevron: (p) => (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" {...p}>
+      <path d="M3.5 4.5L6 7l2.5-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Edit: (p) => (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" {...p}>
+      <path d="M8.5 1.8l1.7 1.7L4 9.7l-2.2.5.5-2.2 6.2-6.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Plus: (p) => (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" {...p}>
+      <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  ),
+};
+
+const CONTACTS = {
+  osp_industry: {
+    name: "Sasha Lindgren, JD",
+    role: "Industry Contracts Lead",
+    dept: "Office of Sponsored Programs",
+    email: "slindgren@uw.edu",
+    phone: "(206) 685-7331",
+    office: "Roosevelt Commons West, Floor 4",
+    hours: "Mon–Fri, 9:00–5:00",
+    handles: ["Industry-sponsored DUAs", "Material Transfer Agreements", "IP / publication clauses"],
+  },
+  osp_intake: {
+    name: "Marcela Quintero, MPH",
+    role: "Pre-Award Intake Specialist",
+    dept: "Office of Sponsored Programs",
+    email: "mquintero@uw.edu",
+    phone: "(206) 543-0098",
+    office: "Roosevelt Commons West, Floor 4",
+    hours: "Mon–Thu, 9:00–4:00",
+    handles: ["Sponsored research intake", "Proposal routing", "Federal pre-award"],
+  },
+  comotion_lic: {
+    name: "Daniel Osei",
+    role: "Licensing Officer — Life Sciences",
+    dept: "CoMotion (Innovation & Tech Transfer)",
+    email: "dosei@uw.edu",
+    phone: "(206) 543-1126",
+    office: "Fluke Hall, Suite 200",
+    hours: "Mon–Fri, 8:30–4:30",
+    handles: ["MTAs", "Outgoing material transfers", "Biological samples"],
+  },
+  comotion_legal: {
+    name: "Priya Raghavan",
+    role: "CoMotion Legal Counsel",
+    dept: "CoMotion (Innovation & Tech Transfer)",
+    email: "praghav@uw.edu",
+    phone: "(206) 685-2412",
+    office: "Fluke Hall, Suite 200",
+    hours: "Mon–Fri, 9:00–5:00",
+    handles: ["NDAs / CDAs", "Confidentiality reviews", "Pre-engagement disclosures"],
+  },
+  ogc: {
+    name: "Hideo Tanaka, JD",
+    role: "Senior Counsel — Research Agreements",
+    dept: "Office of the General Counsel",
+    email: "htanaka@uw.edu",
+    phone: "(206) 543-4043",
+    office: "Gerberding Hall, Suite 360",
+    hours: "Mon–Fri, 9:00–4:00",
+    handles: ["Complex contract review", "Indemnification", "Liability terms"],
+  },
+  privacy: {
+    name: "Allison Park",
+    role: "Privacy Officer — PHI & HIPAA",
+    dept: "UW Medicine Compliance",
+    email: "apark@uw.edu",
+    phone: "(206) 543-3098",
+    office: "Magnuson Health Sciences, K-141",
+    hours: "Mon–Fri, 8:00–5:00",
+    handles: ["PHI sharing", "HIPAA-covered research", "Limited Data Sets"],
+  },
+  global: {
+    name: "Reuben Nakamura",
+    role: "International Research Coordinator",
+    dept: "Office of Global Affairs",
+    email: "rnakamura@uw.edu",
+    phone: "(206) 221-7765",
+    office: "Schmitz Hall, Room 459",
+    hours: "Mon–Thu, 10:00–4:00",
+    handles: ["International collaborations", "Export control review", "Foreign site agreements"],
+  },
+  irb: {
+    name: "Elena Voss",
+    role: "IRB Administrator",
+    dept: "Human Subjects Division",
+    email: "evoss@uw.edu",
+    phone: "(206) 543-0098",
+    office: "Gerberding Hall, Suite 201",
+    hours: "Mon–Fri, 9:00–5:00",
+    handles: ["IRB protocols", "Human subjects review", "Consent materials"],
+  },
+};
+
+const OFFICE_GROUPS = [
+  { title: "CoMotion (Innovation & Tech Transfer)", keys: ["comotion_lic", "comotion_legal"] },
+  { title: "Office of Sponsored Programs", keys: ["osp_intake", "osp_industry"] },
+  { title: "Office of the General Counsel", keys: ["ogc"] },
+  { title: "Human Subjects & Privacy", keys: ["irb", "privacy"] },
+  { title: "Global & International", keys: ["global"] },
+];
+
+function ContactRow({ icon, label, value, link, borderTop }) {
+  const inner = (
+    <div style={{
+      padding: "14px 18px",
+      display: "flex", alignItems: "flex-start", gap: 12,
+      borderTop: borderTop ? "1px solid var(--ink-200)" : "none",
+    }}>
+      <div style={{ color: "var(--ink-500)", marginTop: 2 }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>{label}</div>
+        <div style={{ fontSize: 13, color: link ? "var(--purple-700)" : "var(--ink-900)", marginTop: 2, wordBreak: "break-all" }}>{value}</div>
+      </div>
+    </div>
+  );
+  if (link) return <a href={link} style={{ textDecoration: "none" }}>{inner}</a>;
+  return inner;
+}
+
+function Avatar({ name, size = 38 }) {
+  const initials = name.split(" ").slice(0, 2).map((n) => n[0]).join("");
+  const fontSize = size <= 32 ? 11 : size <= 44 ? 13 : size <= 56 ? 16 : 20;
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 6,
+      background: "linear-gradient(135deg, var(--purple-500), var(--purple-700))",
+      color: "white",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "inherit", fontSize, fontWeight: 600, letterSpacing: "-0.01em",
+      flexShrink: 0,
+    }}>{initials}</div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// documents.jsx — document type definitions
+// ─────────────────────────────────────────────
+
+const DOC_TYPES = [
+  {
+    id: "mta",
+    name: "Material Transfer Agreement",
+    abbrev: "MTA",
+    summary: "Governs the transfer of tangible research materials — biological samples, cell lines, compounds, prototypes — between UW and another institution.",
+    definition: "An MTA is a contract that defines the terms under which physical research materials are shared between organizations. It addresses ownership, allowable use, publication rights, and any obligations to return or destroy unused material. UW CoMotion's licensing office negotiates and signs all incoming and outgoing MTAs.",
+    offices: ["comotion_lic", "ogc"],
+    primaryOffice: "comotion_lic",
+    templates: [
+      { name: "UW Outgoing MTA — Standard Template", format: "PDF", size: "184 KB" },
+      { name: "UBMTA (Uniform Biological MTA) Cover Letter", format: "DOCX", size: "42 KB" },
+      { name: "MTA Information Intake Form", format: "PDF", size: "96 KB" },
+    ],
+    flow: {
+      questions: [
+        {
+          id: "direction",
+          title: "Are materials coming in or going out?",
+          help: "Pick the direction relative to UW.",
+          options: [
+            { value: "incoming", label: "Coming in to UW", sub: "From another institution to a UW researcher" },
+            { value: "outgoing", label: "Going out from UW", sub: "From a UW researcher to another institution" },
+            { value: "both", label: "Both directions", sub: "Bidirectional exchange" },
+            { value: "unsure", label: "I'm not sure", sub: "I'd like guidance" },
+          ],
+        },
+        {
+          id: "material_type",
+          title: "What kind of material is being transferred?",
+          options: [
+            { value: "bio_human", label: "Human-derived biological material", sub: "Tissue, blood, cell lines, derivatives" },
+            { value: "bio_other", label: "Non-human biological material", sub: "Animal tissue, plants, microorganisms" },
+            { value: "chem", label: "Chemical compound or reagent" },
+            { value: "device", label: "Device, prototype, or hardware" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "partner",
+          title: "Who is the other party?",
+          options: [
+            { value: "academic", label: "Another academic or non-profit institution" },
+            { value: "industry", label: "An industry / for-profit partner" },
+            { value: "intl", label: "An international institution" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "phi",
+          title: "Does the material include identifiable patient information?",
+          help: "PHI under HIPAA, or coded data linkable to identities.",
+          options: [
+            { value: "yes", label: "Yes — includes PHI or identifiable codes" },
+            { value: "no", label: "No — fully de-identified" },
+            { value: "na", label: "Not applicable" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+      ],
+      compute(a) {
+        const steps = [];
+        steps.push({
+          office: "CoMotion Licensing",
+          contact: "comotion_lic",
+          action: "Submit MTA Information Intake Form",
+          materials: [
+            "Completed MTA Intake Form (PDF)",
+            "Description of material(s) and quantities",
+            "Provider/recipient contact and institution",
+            "PI name + UW department",
+          ],
+          situation: a.direction === "unsure"
+            ? { label: "Direction", branchOf: "direction", options: [
+                { value: "incoming", label: "Incoming" },
+                { value: "outgoing", label: "Outgoing" },
+              ]}
+            : null,
+        });
+        if (a.material_type === "bio_human" || a.phi === "yes") {
+          steps.push({
+            office: "UW Medicine Privacy Review",
+            contact: "privacy",
+            action: "Privacy & PHI clearance",
+            materials: [
+              "Source of human material",
+              "De-identification status",
+              "IRB protocol number (if applicable)",
+            ],
+          });
+          steps.push({
+            office: "Human Subjects Division",
+            contact: "irb",
+            action: "Confirm IRB coverage",
+            materials: ["Approved IRB protocol or exempt determination"],
+          });
+        }
+        if (a.partner === "industry") {
+          steps.push({
+            office: "Office of the General Counsel",
+            contact: "ogc",
+            action: "Industry terms review",
+            materials: ["Counterparty's draft MTA", "Any side letters", "Existing relationship docs"],
+            situation: { label: "Are publication terms restricted?", branchOf: "publication", options: [
+              { value: "open", label: "Open publication" },
+              { value: "delay", label: "Publication delay requested" },
+              { value: "review", label: "Sponsor pre-review required" },
+            ]},
+          });
+        } else if (a.partner === "intl") {
+          steps.push({
+            office: "Office of Global Affairs",
+            contact: "global",
+            action: "Export control screening",
+            materials: ["Destination country", "End-use statement", "Recipient institution detail"],
+          });
+        }
+        steps.push({
+          office: "CoMotion Licensing",
+          contact: "comotion_lic",
+          action: "Final negotiation and signature",
+          materials: [
+            "Final MTA draft (Word, with track changes if applicable)",
+            "PI sign-off email",
+            "Routing form approvals from prior steps",
+          ],
+        });
+        return steps;
+      },
+    },
+  },
+  {
+    id: "nda",
+    name: "Non-Disclosure Agreement",
+    abbrev: "NDA",
+    summary: "Protects confidential information shared between UW and an external party before, during, or after a research engagement.",
+    definition: "An NDA (also called a Confidentiality Agreement) governs the exchange of proprietary information for a defined purpose. UW most commonly uses NDAs at the exploratory stage of an industry collaboration, before any formal sponsored research agreement is in place.",
+    offices: ["comotion_legal", "ogc"],
+    primaryOffice: "comotion_legal",
+    templates: [
+      { name: "UW Mutual NDA Template", format: "DOCX", size: "58 KB" },
+      { name: "UW One-way NDA — Inbound", format: "DOCX", size: "52 KB" },
+    ],
+    flow: {
+      questions: [
+        {
+          id: "purpose",
+          title: "What's the purpose of the disclosure?",
+          options: [
+            { value: "explore", label: "Explore a potential collaboration", sub: "Before any sponsored agreement" },
+            { value: "diligence", label: "Industry diligence on UW IP", sub: "Reviewing tech for licensing" },
+            { value: "consult", label: "Faculty consulting discussion" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "direction",
+          title: "Who is disclosing confidential information?",
+          options: [
+            { value: "uw_only", label: "UW disclosing to the other party" },
+            { value: "them_only", label: "Other party disclosing to UW" },
+            { value: "mutual", label: "Mutual disclosure" },
+          ],
+        },
+        {
+          id: "term",
+          title: "How long should confidentiality last?",
+          options: [
+            { value: "3y", label: "3 years (UW standard)" },
+            { value: "5y", label: "5 years" },
+            { value: "longer", label: "Longer or perpetual", sub: "Will require additional review" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+      ],
+      compute(a) {
+        const steps = [];
+        steps.push({
+          office: "CoMotion Legal",
+          contact: "comotion_legal",
+          action: "Initial NDA request and template selection",
+          materials: [
+            "Counterparty name + contact",
+            "Brief description of subject matter",
+            "Anticipated start date",
+          ],
+        });
+        if (a.purpose === "diligence") {
+          steps.push({
+            office: "CoMotion Licensing",
+            contact: "comotion_lic",
+            action: "Confirm licensable IP scope",
+            materials: ["Disclosure or invention record", "Licensing officer of record"],
+          });
+        }
+        if (a.term === "longer") {
+          steps.push({
+            office: "Office of the General Counsel",
+            contact: "ogc",
+            action: "Extended-term review",
+            materials: ["Justification for extended term", "Counterparty's draft language"],
+          });
+        }
+        steps.push({
+          office: "CoMotion Legal",
+          contact: "comotion_legal",
+          action: "Negotiate and route for signature",
+          materials: ["Final NDA draft", "Authorized signer designation"],
+          situation: { label: "Counterparty redlines?", branchOf: "redlines", options: [
+            { value: "none", label: "Accept UW template as-is" },
+            { value: "minor", label: "Minor edits" },
+            { value: "major", label: "Substantial redlines" },
+          ]},
+        });
+        return steps;
+      },
+    },
+  },
+  {
+    id: "sra",
+    name: "Sponsored Research Agreement",
+    abbrev: "SRA",
+    summary: "Governs externally funded research conducted at UW, defining scope, deliverables, IP, and payment terms.",
+    definition: "An SRA is the principal contract for externally funded research. The Office of Sponsored Programs (OSP) is the authorized signatory for all SRAs at UW; PIs cannot sign on behalf of the university. SRAs may originate from federal, state, foundation, or industry sponsors.",
+    offices: ["osp_intake", "osp_industry", "ogc"],
+    primaryOffice: "osp_intake",
+    templates: [
+      { name: "OSP eGC1 Routing Form", format: "Online", size: "Web form" },
+      { name: "Industry SRA Template", format: "DOCX", size: "112 KB" },
+      { name: "Subaward Risk Questionnaire", format: "PDF", size: "78 KB" },
+    ],
+    flow: {
+      questions: [
+        {
+          id: "sponsor",
+          title: "Who is the sponsor?",
+          options: [
+            { value: "federal", label: "Federal agency", sub: "NIH, NSF, DOE, DoD, etc." },
+            { value: "foundation", label: "Foundation or non-profit" },
+            { value: "industry", label: "Industry / for-profit" },
+            { value: "intl", label: "International sponsor" },
+          ],
+        },
+        {
+          id: "stage",
+          title: "What stage is the proposal at?",
+          options: [
+            { value: "pre", label: "Pre-proposal — exploring", sub: "No solicitation yet" },
+            { value: "draft", label: "Drafting the proposal" },
+            { value: "ready", label: "Ready to submit" },
+            { value: "awarded", label: "Awarded — negotiating terms" },
+          ],
+        },
+        {
+          id: "subaward",
+          title: "Are there subawards to other institutions?",
+          options: [
+            { value: "no", label: "No subawards" },
+            { value: "one_two", label: "One or two subawards" },
+            { value: "many", label: "Three or more subawards" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "humans",
+          title: "Does the research involve human subjects?",
+          options: [
+            { value: "yes", label: "Yes" },
+            { value: "no", label: "No" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+      ],
+      compute(a) {
+        const steps = [];
+        steps.push({
+          office: "OSP Pre-Award Intake",
+          contact: "osp_intake",
+          action: "Initiate eGC1 routing",
+          materials: [
+            "Project title and abstract",
+            "Sponsor solicitation or RFP (if any)",
+            "Budget and budget justification (draft acceptable)",
+            "PI and co-I list with effort percentages",
+          ],
+          situation: a.stage === "pre"
+            ? { label: "Pre-proposal type", branchOf: "preproposal", options: [
+                { value: "loi", label: "Letter of intent" },
+                { value: "concept", label: "Concept paper" },
+                { value: "white", label: "White paper" },
+              ]}
+            : null,
+        });
+        if (a.sponsor === "industry") {
+          steps.push({
+            office: "OSP Industry Contracts",
+            contact: "osp_industry",
+            action: "Industry term sheet review",
+            materials: [
+              "Sponsor's draft agreement",
+              "Statement of work",
+              "IP and publication expectations",
+            ],
+          });
+        }
+        if (a.humans === "yes" || a.humans === "unsure") {
+          steps.push({
+            office: "Human Subjects Division",
+            contact: "irb",
+            action: "IRB protocol submission",
+            materials: ["Draft protocol", "Recruitment materials", "Consent form drafts"],
+          });
+        }
+        if (a.subaward === "one_two" || a.subaward === "many") {
+          steps.push({
+            office: "OSP Pre-Award Intake",
+            contact: "osp_intake",
+            action: "Subaward risk assessment",
+            materials: [
+              "Subrecipient FDP profile or risk questionnaire",
+              "Scope of work for each sub",
+              "Sub-budget and justification",
+            ],
+            situation: { label: "Subrecipient is", branchOf: "sub_type", options: [
+              { value: "fdp", label: "FDP member institution" },
+              { value: "other_us", label: "Other US institution" },
+              { value: "intl_sub", label: "International institution" },
+            ]},
+          });
+        }
+        if (a.sponsor === "intl") {
+          steps.push({
+            office: "Office of Global Affairs",
+            contact: "global",
+            action: "Export control & foreign sponsor screening",
+            materials: ["Sponsor entity details", "End-use country", "Restricted-party screen results"],
+          });
+        }
+        steps.push({
+          office: "OSP Pre-Award Intake",
+          contact: "osp_intake",
+          action: "Final review and submission to sponsor",
+          materials: ["Final eGC1 with all approvals", "Sponsor-formatted proposal package"],
+        });
+        return steps;
+      },
+    },
+  },
+  {
+    id: "dua",
+    name: "Data Use Agreement",
+    abbrev: "DUA",
+    summary: "Governs the transfer of research data — particularly data that includes identifiable, sensitive, or restricted information — between UW and an external institution.",
+    definition: "A DUA defines who may use the data, for what purpose, with what protections, and for how long. UW typically routes DUAs through OSP, with PHI-specific reviews handled by UW Medicine Compliance.",
+    offices: ["osp_industry", "privacy", "ogc"],
+    primaryOffice: "osp_industry",
+    templates: [
+      { name: "UW Outgoing DUA Template", format: "DOCX", size: "64 KB" },
+      { name: "Limited Data Set DUA — HIPAA", format: "DOCX", size: "72 KB" },
+    ],
+    flow: {
+      questions: [
+        {
+          id: "direction",
+          title: "Are you sending or receiving data?",
+          options: [
+            { value: "incoming", label: "Receiving from another institution" },
+            { value: "outgoing", label: "Sending UW data out" },
+            { value: "both", label: "Both" },
+          ],
+        },
+        {
+          id: "phi",
+          title: "Does the data include PHI?",
+          options: [
+            { value: "yes", label: "Yes — includes PHI or HIPAA-covered identifiers" },
+            { value: "lds", label: "Limited Data Set", sub: "Dates, geocodes, but no direct identifiers" },
+            { value: "no", label: "No — fully de-identified or non-health" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "partner",
+          title: "Who is the other party?",
+          options: [
+            { value: "academic", label: "Academic / non-profit" },
+            { value: "industry", label: "Industry / for-profit" },
+            { value: "intl", label: "International institution" },
+          ],
+        },
+      ],
+      compute(a) {
+        const steps = [];
+        steps.push({
+          office: "OSP Contracts",
+          contact: "osp_industry",
+          action: "Submit DUA intake",
+          materials: ["Data description", "Counterparty institution", "PI and study reference"],
+        });
+        if (a.phi === "yes" || a.phi === "lds" || a.phi === "unsure") {
+          steps.push({
+            office: "UW Medicine Privacy",
+            contact: "privacy",
+            action: "PHI compliance review",
+            materials: ["Data dictionary", "De-identification methodology", "IRB approval if applicable"],
+            situation: { label: "Identifiability level", branchOf: "id_level", options: [
+              { value: "phi_full", label: "Full PHI" },
+              { value: "lds", label: "Limited Data Set" },
+              { value: "deid", label: "De-identified per Safe Harbor" },
+            ]},
+          });
+        }
+        if (a.partner === "intl") {
+          steps.push({
+            office: "Office of Global Affairs",
+            contact: "global",
+            action: "Cross-border data transfer review",
+            materials: ["Destination country", "Data residency obligations", "Local law compliance memo"],
+          });
+        }
+        steps.push({
+          office: "OSP Contracts",
+          contact: "osp_industry",
+          action: "Negotiate and execute DUA",
+          materials: ["Final DUA draft", "All prior approvals attached"],
+        });
+        return steps;
+      },
+    },
+  },
+  {
+    id: "cda",
+    name: "Confidential Disclosure Agreement",
+    abbrev: "CDA",
+    summary: "A two-way NDA used specifically when both UW and an industry partner expect to exchange confidential technical information.",
+    definition: "A CDA is functionally similar to a mutual NDA but is the term commonly used in industry-academic exchanges and CoMotion-led licensing discussions. It defines what counts as confidential, how long protection lasts, and what may be done with the information.",
+    offices: ["comotion_legal"],
+    primaryOffice: "comotion_legal",
+    templates: [
+      { name: "UW CDA Template — CoMotion", format: "DOCX", size: "60 KB" },
+    ],
+    flow: {
+      questions: [
+        {
+          id: "context",
+          title: "What's the context for the CDA?",
+          options: [
+            { value: "license", label: "Licensing discussion on UW IP" },
+            { value: "research", label: "Pre-research scoping with industry" },
+            { value: "consult", label: "Faculty consulting" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "redlines",
+          title: "Has the counterparty proposed their own draft?",
+          options: [
+            { value: "their_draft", label: "Yes — they sent their template" },
+            { value: "uw_draft", label: "No — we'll send the UW template" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+      ],
+      compute(a) {
+        const steps = [];
+        steps.push({
+          office: "CoMotion Legal",
+          contact: "comotion_legal",
+          action: "Submit CDA request",
+          materials: ["Counterparty contact", "Subject matter summary", "Authorized signer at UW"],
+        });
+        if (a.redlines === "their_draft") {
+          steps.push({
+            office: "CoMotion Legal",
+            contact: "comotion_legal",
+            action: "Redline review of counterparty template",
+            materials: ["Counterparty's draft", "UW standard terms checklist"],
+            situation: { label: "Redline complexity", branchOf: "redlines", options: [
+              { value: "minor", label: "Minor — terms only" },
+              { value: "structural", label: "Structural rewrite needed" },
+            ]},
+          });
+        }
+        steps.push({
+          office: "CoMotion Legal",
+          contact: "comotion_legal",
+          action: "Route for signature",
+          materials: ["Final CDA", "Signer designation"],
+        });
+        return steps;
+      },
+    },
+  },
+  {
+    id: "irb",
+    name: "IRB Protocol",
+    abbrev: "IRB",
+    summary: "Required review for any UW research involving human subjects or their identifiable data.",
+    definition: "All human subjects research at UW must be reviewed by the Human Subjects Division (HSD) before any participant interaction or data collection begins. The level of review — exempt, expedited, or full board — depends on the risk level and research category.",
+    offices: ["irb", "privacy"],
+    primaryOffice: "irb",
+    templates: [
+      { name: "Zipline IRB Submission Portal", format: "Online", size: "Web portal" },
+      { name: "Consent Form Template — Adult", format: "DOCX", size: "48 KB" },
+      { name: "Exempt Determination Request", format: "PDF", size: "32 KB" },
+    ],
+    flow: {
+      questions: [
+        {
+          id: "interaction",
+          title: "Does your research involve interaction with people?",
+          options: [
+            { value: "yes_intervene", label: "Yes — interventions or interactions" },
+            { value: "data_only", label: "No — only their identifiable data" },
+            { value: "no", label: "No — fully de-identified or non-human" },
+          ],
+        },
+        {
+          id: "risk",
+          title: "What's the risk level for participants?",
+          options: [
+            { value: "minimal", label: "Minimal risk", sub: "No greater than everyday life" },
+            { value: "greater", label: "Greater than minimal" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+        {
+          id: "vulnerable",
+          title: "Are vulnerable populations involved?",
+          options: [
+            { value: "yes", label: "Yes", sub: "Children, prisoners, pregnant individuals, etc." },
+            { value: "no", label: "No" },
+            { value: "unsure", label: "I'm not sure" },
+          ],
+        },
+      ],
+      compute(a) {
+        const steps = [];
+        if (a.interaction === "no") {
+          steps.push({
+            office: "Human Subjects Division",
+            contact: "irb",
+            action: "Confirm research is not human subjects",
+            materials: ["Project description", "Data sources and identifiability"],
+          });
+          return steps;
+        }
+        steps.push({
+          office: "Human Subjects Division",
+          contact: "irb",
+          action: "Determine review category",
+          materials: ["Brief protocol summary", "Risk assessment", "Population description"],
+          situation: { label: "Category", branchOf: "category", options: [
+            { value: "exempt", label: "Exempt" },
+            { value: "expedited", label: "Expedited" },
+            { value: "full", label: "Full board" },
+          ]},
+        });
+        steps.push({
+          office: "Human Subjects Division",
+          contact: "irb",
+          action: "Submit protocol via Zipline",
+          materials: ["Full protocol document", "Consent forms", "Recruitment materials", "Data security plan"],
+        });
+        if (a.vulnerable === "yes" || a.risk === "greater") {
+          steps.push({
+            office: "Human Subjects Division",
+            contact: "irb",
+            action: "Convened board review",
+            materials: ["Subpart B/C/D-specific protections memo", "PI in-person availability for review"],
+          });
+        }
+        return steps;
+      },
+    },
+  },
+];
+
+const DOC_BY_ID = Object.fromEntries(DOC_TYPES.map((d) => [d.id, d]));
+const API_BASE = "/api";
+
+function snapshotToDoc(snapshot) {
+  const graph = snapshot?.snapshotJson || {};
+  const flow = graph.flow || {};
+  const nodes = graph.nodes || [];
+  const edges = graph.edges || [];
+  const definition = nodes.find((n) => n.type === "DEFINITION");
+  const definitionContent = definition?.content || {};
+  const decisions = nodes.filter((n) => n.type === "DECISION");
+  const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const abbrev = (flow.name || "DOC").split(/\s+/).map((w) => w[0]).join("").slice(0, 4).toUpperCase();
+  return {
+    id: flow.id || snapshot.flowId,
+    name: flow.name || "Published Flow",
+    abbrev,
+    summary: flow.description || definitionContent.description || "",
+    definition: definitionContent.description || flow.description || "",
+    offices: ["comotion_legal"],
+    primaryOffice: "comotion_legal",
+    templates: (definitionContent.templates || []).map((template) => ({
+      name: template.label,
+      format: template.url ? "Link" : "Pending",
+      size: template.url || "Attachment pending",
+    })),
+    flow: {
+      questions: decisions.map((node) => ({
+        id: node.id,
+        title: node.content?.question || node.label,
+        options: (node.answers || []).map((answer) => ({ value: answer.id, label: answer.text })),
+      })),
+      compute(answers) {
+        const steps = [];
+        const definitionEdge = edges.find((edge) => edge.sourceNodeId === definition?.id);
+        let current = nodeById[definitionEdge?.targetNodeId];
+        const visited = new Set();
+        while (current && !visited.has(current.id)) {
+          visited.add(current.id);
+          if (current.type === "ACTION") {
+            steps.push({
+              office: current.content?.assignee || "UW CoMotion",
+              contact: "comotion_legal",
+              action: current.content?.title || current.label,
+              materials: (current.content?.materials || []).map((material) => material.label),
+            });
+            break;
+          }
+          if (current.type !== "DECISION") break;
+          const selected = answers[current.id] || current.answers?.[0]?.id;
+          const nextEdge = edges.find((edge) => edge.sourceNodeId === current.id && edge.sourceAnswerId === selected);
+          current = nodeById[nextEdge?.targetNodeId];
+        }
+        return steps;
+      },
+    },
+  };
+}
+
+// ─────────────────────────────────────────────
+// wizard.jsx — per-doc intake wizard
+// ─────────────────────────────────────────────
+
+function DocWizard({ doc, initialAnswers, onApply, onCancel }) {
+  const questions = doc.flow.questions;
+  const [answers, setAnswers] = useState(initialAnswers || {});
+  const [stepIdx, setStepIdx] = useState(0);
+
+  const step = questions[stepIdx];
+  const total = questions.length;
+  const answered = answers[step.id] !== undefined;
+  const isLast = stepIdx === total - 1;
+  const pct = ((stepIdx + (answered ? 1 : 0)) / total) * 100;
+
+  function pick(v) { setAnswers({ ...answers, [step.id]: v }); }
+  function next() { if (isLast) onApply(answers); else setStepIdx(stepIdx + 1); }
+  function back() { if (stepIdx === 0) onCancel(); else setStepIdx(stepIdx - 1); }
+
+  return (
+    <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+      <div style={{ padding: "20px 28px 0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <button onClick={back} style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "var(--ink-700)", fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+            <Icon.Back /> {stepIdx === 0 ? "Cancel" : "Back"}
+          </button>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5 }}>
+            QUESTION {String(stepIdx + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+          </Mono>
+        </div>
+        <div style={{ height: 2, background: "var(--ink-200)", borderRadius: 1, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: "var(--purple-700)", transition: "width 240ms ease" }} />
+        </div>
+      </div>
+
+      <div style={{ padding: "28px 28px 8px" }}>
+        <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, lineHeight: 1.3, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700 }}>
+          {step.title}
+        </div>
+        {step.help && (
+          <div style={{ marginTop: 6, color: "var(--ink-700)", fontSize: 13, lineHeight: 1.5 }}>{step.help}</div>
+        )}
+        <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+          {step.options.map((opt, i) => {
+            const sel = answers[step.id] === opt.value;
+            return (
+              <button key={opt.value} onClick={() => pick(opt.value)} style={{
+                textAlign: "left", display: "flex", alignItems: "flex-start", gap: 12,
+                padding: "11px 14px",
+                background: sel ? "var(--purple-50)" : "white",
+                border: `1px solid ${sel ? "var(--purple-600)" : "var(--ink-200)"}`,
+                borderRadius: 6, cursor: "pointer",
+                transition: "border-color 120ms ease, background 120ms ease",
+                fontFamily: "inherit",
+                boxShadow: sel ? "0 0 0 3px var(--purple-100)" : "none",
+              }}
+              onMouseEnter={(e) => { if (!sel) e.currentTarget.style.borderColor = "var(--ink-300)"; }}
+              onMouseLeave={(e) => { if (!sel) e.currentTarget.style.borderColor = "var(--ink-200)"; }}
+              >
+                <div style={{
+                  flexShrink: 0, width: 20, height: 20, borderRadius: 4,
+                  background: sel ? "var(--purple-700)" : "transparent",
+                  border: sel ? "none" : "1px solid var(--ink-300)",
+                  color: "white",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 500, marginTop: 1,
+                }}>
+                  {sel ? <Icon.Check /> : String.fromCharCode(65 + i)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "var(--ink-900)", fontSize: 13.5, fontWeight: 500, lineHeight: 1.4 }}>{opt.label}</div>
+                  {opt.sub && <div style={{ color: "var(--ink-500)", fontSize: 12, lineHeight: 1.45, marginTop: 2 }}>{opt.sub}</div>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 20, padding: "12px 28px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
+          Press <Mono style={{ background: "var(--ink-200)", padding: "1px 5px", borderRadius: 3 }}>A–{String.fromCharCode(64 + step.options.length)}</Mono> to select
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => onApply(answers)} disabled={Object.keys(answers).length === 0} style={{ ...ghostBtn, opacity: Object.keys(answers).length === 0 ? 0.5 : 1, cursor: Object.keys(answers).length === 0 ? "not-allowed" : "pointer" }} title="Submit answers collected so far">
+            Apply now
+          </button>
+          <button onClick={next} disabled={!answered} style={{ ...primaryBtn, opacity: answered ? 1 : 0.4, cursor: answered ? "pointer" : "not-allowed" }}>
+            {isLast ? "Generate flow" : "Next"} <Icon.Arrow />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// steps.jsx — step cards
+// ─────────────────────────────────────────────
+
+function StepCard({ step, idx, total, onContact, onSituationChange, situationValue }) {
+  const [open, setOpen] = useState(false);
+  const c = CONTACTS[step.contact];
+
+  return (
+    <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+      <div style={{ padding: "16px 20px", display: "flex", alignItems: "flex-start", gap: 14 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 999, background: "var(--purple-700)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>
+          {String(idx + 1).padStart(2, "0")}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: 0.6, textTransform: "uppercase" }}>
+            Step {idx + 1} of {total} · {step.office}
+          </Mono>
+          <div style={{ fontSize: 16, fontWeight: 500, color: "var(--ink)", marginTop: 3, letterSpacing: -0.1 }}>{step.action}</div>
+        </div>
+      </div>
+
+      {step.situation && (
+        <div style={{ padding: "10px 20px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Situation</Mono>
+          <span style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{step.situation.label}:</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {step.situation.options.map((opt) => {
+              const sel = situationValue === opt.value;
+              return (
+                <button key={opt.value} onClick={() => onSituationChange(step.situation.branchOf, opt.value)} style={{
+                  padding: "4px 10px", borderRadius: 999,
+                  background: sel ? "var(--purple-700)" : "white",
+                  color: sel ? "white" : "var(--ink-700)",
+                  border: `1px solid ${sel ? "var(--purple-700)" : "var(--ink-200)"}`,
+                  fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+                }}>{opt.label}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {open && (
+        <div style={{ padding: "14px 20px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)" }}>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: 0.6, textTransform: "uppercase" }}>Materials to prepare</Mono>
+          <ul style={{ margin: "10px 0 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+            {step.materials.map((m, i) => (
+              <li key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13.5, color: "var(--ink)" }}>
+                <span style={{ color: "var(--ink-3)", marginTop: 1, flexShrink: 0 }}><Icon.Doc /></span>
+                <span>{m}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div style={{ padding: "12px 20px", background: "white", borderTop: "1px solid var(--ink-200)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button onClick={() => onContact(step.contact)} style={ghostBtn}>
+          <Icon.Mail /> Contact {c.name.split(" ")[0]}
+        </button>
+        <button onClick={() => setOpen(!open)} style={{ ...ghostBtn, background: open ? "var(--ink-100)" : "white" }}>
+          <Icon.Doc /> Materials to prepare
+          <span style={{ transform: open ? "rotate(180deg)" : "rotate(0)", display: "inline-flex", transition: "transform 150ms" }}>
+            <Icon.Chevron />
+          </span>
+        </button>
+        <div style={{ flex: 1 }} />
+        <Mono style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: 0.5 }}>{c.dept}</Mono>
+      </div>
+    </div>
+  );
+}
+
+function StepResults({ steps, situationOverrides, onSituationChange, onContact }) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? steps : steps.slice(0, 1);
+
+  return (
+    <div>
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 12 }}>
+        {visible.map((s, i) => (
+          <React.Fragment key={i}>
+            <StepCard
+              step={s} idx={i} total={steps.length}
+              onContact={onContact}
+              onSituationChange={onSituationChange}
+              situationValue={s.situation ? situationOverrides[s.situation.branchOf] : null}
+            />
+            {i < visible.length - 1 && (
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: 8 }}>
+                <div style={{ width: 1, height: 12, background: "var(--hairline-2)", marginTop: -6 }} />
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {steps.length > 1 && (
+        <div style={{ marginTop: 14, padding: "10px 14px", background: "white", border: "1px dashed var(--ink-300)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
+            {showAll
+              ? `Showing all ${steps.length} steps in this signing flow.`
+              : `${steps.length - 1} more step${steps.length - 1 === 1 ? "" : "s"} after this one.`}
+          </div>
+          <button onClick={() => setShowAll(!showAll)} style={linkBtn}>
+            {showAll ? "Fold to step 1" : "See all steps"} <Icon.Arrow />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// customize.jsx — customization panel
+// ─────────────────────────────────────────────
+
+function CustomizePanel({ doc, answers, onApply }) {
+  const [draft, setDraft] = useState(answers);
+  const [editingId, setEditingId] = useState(null);
+
+  useEffect(() => { setDraft(answers); setEditingId(null); }, [answers]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(answers);
+
+  function setVal(qid, v) { setDraft({ ...draft, [qid]: v }); setEditingId(null); }
+
+  return (
+    <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+      <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid var(--ink-200)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Stage 3</Mono>
+          <div style={{ fontFamily: "var(--font-headline)", fontSize: 16, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2 }}>
+            Customize your information
+          </div>
+        </div>
+        <div style={{ marginTop: 4, fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>
+          Edit any answer below and re-apply to regenerate the signing flow without losing context.
+        </div>
+      </div>
+
+      <div style={{ padding: "6px 0" }}>
+        {doc.flow.questions.map((q, i) => {
+          const v = draft[q.id];
+          const opt = q.options.find((o) => o.value === v);
+          const isEditing = editingId === q.id;
+          return (
+            <div key={q.id} style={{ padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid var(--ink-200)", display: "flex", gap: 16, alignItems: "flex-start" }}>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5, marginTop: 4, flexShrink: 0, width: 26 }}>
+                Q{i + 1}
+              </Mono>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.4 }}>{q.title}</div>
+                {!isEditing ? (
+                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13.5, color: "var(--ink-900)", fontWeight: 500 }}>
+                      {opt ? opt.label : <span style={{ color: "var(--ink-500)", fontWeight: 400, fontStyle: "italic" }}>Not answered</span>}
+                    </span>
+                    <button onClick={() => setEditingId(q.id)} style={{ ...linkBtn, fontSize: 12 }}>
+                      <Icon.Edit /> Change
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                    {q.options.map((o) => {
+                      const sel = v === o.value;
+                      return (
+                        <button key={o.value} onClick={() => setVal(q.id, o.value)} style={{
+                          textAlign: "left", padding: "8px 12px",
+                          background: sel ? "var(--purple-50)" : "white",
+                          border: `1px solid ${sel ? "var(--purple-700)" : "var(--ink-200)"}`,
+                          borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: "var(--ink-900)",
+                        }}>{o.label}</button>
+                      );
+                    })}
+                    <button onClick={() => setEditingId(null)} style={{ ...linkBtn, fontSize: 12, alignSelf: "flex-start", marginTop: 2 }}>Cancel</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ padding: "12px 20px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
+          {dirty ? "Answers changed — apply to regenerate the flow." : "Answers match the current flow."}
+        </div>
+        <button onClick={() => onApply(draft)} disabled={!dirty} style={{ ...primaryBtn, opacity: dirty ? 1 : 0.4, cursor: dirty ? "pointer" : "not-allowed" }}>
+          <Icon.Refresh /> Apply changes
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// documents-pages.jsx — index + detail
+// ─────────────────────────────────────────────
+
+function DocumentTypesIndex({ onPick, docs = DOC_TYPES }) {
+  const [q, setQ] = useState("");
+  const filtered = docs.filter((d) => {
+    if (!q) return true;
+    const hay = (d.name + " " + d.abbrev + " " + d.summary).toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+      <div style={{ padding: "32px 40px 56px" }}>
+        <div style={{ fontFamily: "var(--font-headline)", fontSize: 26, color: "var(--ink-900)", letterSpacing: -0.4, fontWeight: 700 }}>
+          Document types
+        </div>
+        <div style={{ marginTop: 8, color: "var(--ink-700)", fontSize: 13.5, maxWidth: 640, lineHeight: 1.5 }}>
+          Browse the agreements and approvals UW supports. Open a document type to learn what it covers and find a signing flow tailored to your situation.
+        </div>
+
+        <div style={{ marginTop: 22, position: "relative", maxWidth: 480 }}>
+          <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-500)" }}>
+            <Icon.Search />
+          </div>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Filter by name (MTA, NDA, IRB…)"
+            style={{ width: "100%", padding: "9px 14px 9px 38px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, fontSize: 13, color: "var(--ink-900)", fontFamily: "inherit", outline: "none" }}
+            onFocus={(e) => { e.target.style.borderColor = "var(--purple-600)"; e.target.style.boxShadow = "0 0 0 3px var(--purple-100)"; }}
+            onBlur={(e) => { e.target.style.borderColor = "var(--ink-200)"; e.target.style.boxShadow = "none"; }}
+          />
+        </div>
+
+        <div style={{ marginTop: 26, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+          {filtered.map((d) => (
+            <div key={d.id} onClick={() => onPick(d.id)} style={{ minWidth: 0, padding: "18px 18px 16px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, cursor: "pointer", transition: "border-color 120ms ease, box-shadow 120ms ease", display: "flex", flexDirection: "column", gap: 10, boxShadow: "var(--shadow-sm)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6 }}>{d.abbrev}</Mono>
+                  <div style={{ fontFamily: "var(--font-headline)", fontSize: 15, fontWeight: 600, color: "var(--ink-900)", marginTop: 2, letterSpacing: -0.2, overflowWrap: "anywhere" }}>{d.name}</div>
+                </div>
+                <div style={{ color: "var(--ink-400)" }}><Icon.Arrow /></div>
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>{d.summary}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
+                {d.offices.slice(0, 3).map((k) => (
+                  <Pill key={k} tone="soft">{(CONTACTS[k]?.dept || k).replace(/^Office of /, "").replace(/\(.*\)/, "").trim()}</Pill>
+                ))}
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ padding: 30, color: "var(--ink-500)", fontSize: 13 }}>No document types match.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
+  const doc = DOC_BY_ID[docId];
+  const [stage, setStage] = useState("questions");
+  const [answers, setAnswers] = useState({});
+  const [situationOverrides, setSituationOverrides] = useState({});
+
+  const steps = useMemo(() => {
+    if (stage !== "results") return [];
+    return doc.flow.compute({ ...answers, ...situationOverrides });
+  }, [stage, answers, situationOverrides, doc]);
+
+  function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
+  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--canvas-bg)" }}>
+      <div style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 100,
+        width: "100%",
+        background: "rgba(255,255,255,0.96)",
+        borderBottom: "1px solid var(--ink-200)",
+        boxShadow: "0 1px 3px rgba(40,20,70,0.04)",
+        padding: "12px 40px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexShrink: 0,
+      }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
+            <Icon.Back /> Document types
+          </button>
+          <span style={{ color: "var(--ink-400)" }}>›</span>
+          <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
+      </div>
+
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <div style={{ flex: "0 0 63%", minWidth: 0, overflowY: "auto", padding: "24px 36px 64px 40px" }}>
+          <section>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{doc.name}</div>
+            <Pill tone="outline">{doc.abbrev}</Pill>
+          </div>
+          <div style={{ marginTop: 14, fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", maxWidth: 600 }}>{doc.definition}</div>
+
+          <div style={{ marginTop: 28 }}>
+          <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700, lineHeight: 1.2 }}>
+            Find a signing flow
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>
+            Answer a few questions to get a customized routing for your {doc.abbrev}.
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            {stage === "questions" ? (
+              <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
+            ) : (
+              <>
+                <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, flexWrap: "wrap", boxShadow: "var(--shadow-sm)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Pill tone="success"><Icon.Check /> Flow generated</Pill>
+                    <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+                  </div>
+                  <button onClick={restartFlow} style={{ ...linkBtn, fontSize: 12 }}><Icon.Refresh /> Restart</button>
+                </div>
+
+                <StepResults
+                  steps={steps}
+                  situationOverrides={situationOverrides}
+                  onSituationChange={(key, val) => setSituationOverrides({ ...situationOverrides, [key]: val })}
+                  onContact={onContact}
+                />
+
+                <div style={{ marginTop: 24 }}>
+                  <CustomizePanel
+                    doc={doc}
+                    answers={answers}
+                    onApply={(newAnswers) => { setAnswers(newAnswers); setSituationOverrides({}); }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          </div>
+          </section>
+        </div>
+
+        <div style={{ flex: "0 0 37%", minWidth: 0, borderLeft: "1px solid var(--ink-200)", overflowY: "auto", background: "var(--canvas-bg)" }}>
+          <div style={{ padding: "24px 24px 48px" }}>
+            <div>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Related offices</Mono>
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxWidth: 480 }}>
+                {doc.offices.map((k) => {
+                  const c = CONTACTS[k];
+                  return (
+                    <div key={k} onClick={() => onContact(k)} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+                    >
+                      <Avatar name={c.name} size={32} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-900)" }}>{c.dept}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>{c.name} · {c.role}</div>
+                      </div>
+                      <Icon.Arrow />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24 }}>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Available templates</Mono>
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxWidth: 480 }}>
+                {doc.templates.map((t, i) => (
+                  <a key={i} href="#" onClick={(e) => e.preventDefault()} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, textDecoration: "none", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+                  >
+                    <div style={{ color: "var(--ink-500)" }}><Icon.Doc /></div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-900)" }}>{t.name}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>{t.format} · {t.size}</div>
+                    </div>
+                    <div style={{ color: "var(--purple-700)" }}><Icon.Download /></div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
+  const doc = docs.find((d) => d.id === docId) || DOC_BY_ID[docId];
+  const [stage, setStage] = useState("questions");
+  const [answers, setAnswers] = useState({});
+  const [situationOverrides, setSituationOverrides] = useState({});
+
+  const steps = useMemo(() => {
+    if (stage !== "results") return [];
+    return doc.flow.compute({ ...answers, ...situationOverrides });
+  }, [stage, answers, situationOverrides, doc]);
+
+  function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
+  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--canvas-bg)" }}>
+      <div style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 100,
+        width: "100%",
+        background: "rgba(255,255,255,0.96)",
+        borderBottom: "1px solid var(--ink-200)",
+        boxShadow: "0 1px 3px rgba(40,20,70,0.04)",
+        padding: "12px 40px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexShrink: 0,
+      }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
+          <Icon.Back /> Document types
+        </button>
+        <span style={{ color: "var(--ink-400)" }}>›</span>
+        <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+        <div style={{ flex: "0 0 50%", minWidth: 0, padding: "24px 32px 64px" }}>
+          <section>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+              <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{doc.name}</div>
+              <Pill tone="outline">{doc.abbrev}</Pill>
+            </div>
+            <div style={{ marginTop: 18 }}>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Description</Mono>
+              <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", maxWidth: 600 }}>{doc.definition}</div>
+            </div>
+
+            <div style={{ marginTop: 24, maxWidth: 600 }}>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Related offices</Mono>
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+                {doc.offices.map((k) => {
+                  const c = CONTACTS[k];
+                  return (
+                    <div key={k} onClick={() => onContact(k)} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+                    >
+                      <Avatar name={c.name} size={32} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-900)" }}>{c.dept}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>{c.name} · {c.role}</div>
+                      </div>
+                      <Icon.Arrow />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24, maxWidth: 600 }}>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Available templates</Mono>
+              <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, width: "100%" }}>
+                {doc.templates.map((t, i) => (
+                  <a key={i} href="#" onClick={(e) => e.preventDefault()} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, textDecoration: "none", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+                  >
+                    <div style={{ color: "var(--ink-500)" }}><Icon.Doc /></div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-900)" }}>{t.name}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>{t.format} · {t.size}</div>
+                    </div>
+                    <div style={{ color: "var(--purple-700)" }}><Icon.Download /></div>
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24, maxWidth: 600 }}>
+              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Processing time</Mono>
+              <div style={{ marginTop: 10, padding: "12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, boxShadow: "var(--shadow-sm)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, width: "100%" }}>
+                  {[
+                    { label: "1-3 days", pct: 42 },
+                    { label: "3-7 days", pct: 38 },
+                    { label: ">7 days", pct: 20 },
+                  ].map((item) => (
+                    <div key={item.label}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: "var(--ink-700)" }}>
+                        <span>{item.label}</span>
+                        <Mono style={{ fontSize: 10.5, color: "var(--ink-500)" }}>{item.pct}%</Mono>
+                      </div>
+                      <div style={{ marginTop: 5, height: 6, background: "var(--ink-100)", borderRadius: 999, overflow: "hidden" }}>
+                        <div style={{ width: `${item.pct}%`, height: "100%", background: "var(--purple-700)", borderRadius: 999 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    {["AP", "JL", "SR"].map((initials, i) => (
+                      <div key={initials} style={{ width: 18, height: 18, borderRadius: "50%", background: ["var(--purple-600)", "oklch(0.62 0.14 205)", "oklch(0.66 0.14 145)"][i], color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7.5, fontWeight: 700, marginLeft: i === 0 ? 0 : -5, border: "1.5px solid white", filter: "blur(0.7px)", opacity: 0.8 }}>
+                        {initials}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-500)", fontStyle: "italic" }}>data from real cases</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div style={{ width: 1, background: "var(--ink-200)", alignSelf: "stretch", flexShrink: 0, marginTop: 24, marginBottom: 24 }} />
+        <div style={{ flex: "0 0 50%", minWidth: 0, background: "var(--canvas-bg)" }}>
+          <div style={{ padding: "24px 32px 64px" }}>
+            <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700, lineHeight: 1.2 }}>
+              Find a signing flow
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>
+              Answer a few questions to get a customized routing for your {doc.abbrev}.
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              {stage === "questions" ? (
+                <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
+              ) : (
+                <>
+                  <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, flexWrap: "wrap", boxShadow: "var(--shadow-sm)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Pill tone="success"><Icon.Check /> Flow generated</Pill>
+                      <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+                    </div>
+                    <button onClick={restartFlow} style={{ ...linkBtn, fontSize: 12 }}><Icon.Refresh /> Restart</button>
+                  </div>
+
+                  <StepResults
+                    steps={steps}
+                    situationOverrides={situationOverrides}
+                    onSituationChange={(key, val) => setSituationOverrides({ ...situationOverrides, [key]: val })}
+                    onContact={onContact}
+                  />
+
+                  <div style={{ marginTop: 24 }}>
+                    <CustomizePanel
+                      doc={doc}
+                      answers={answers}
+                      onApply={(newAnswers) => { setAnswers(newAnswers); setSituationOverrides({}); }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// contacts-pages.jsx — directory + detail
+// ─────────────────────────────────────────────
+
+function ContactDirectory({ onContact }) {
+  return (
+    <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+      <div style={{ padding: "32px 40px 56px" }}>
+        <div style={{ fontFamily: "var(--font-headline)", fontSize: 26, color: "var(--ink-900)", letterSpacing: -0.4, fontWeight: 700 }}>Contact directory</div>
+        <div style={{ marginTop: 8, color: "var(--ink-700)", fontSize: 13.5, maxWidth: 620, lineHeight: 1.5 }}>
+          All routing destinations, organized by office. Use this if you already know who you need.
+        </div>
+
+        <div style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 28 }}>
+          {OFFICE_GROUPS.map((g) => (
+            <div key={g.title}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>{g.title}</Mono>
+                <Hairline style={{ flex: 1, maxWidth: "60%" }} />
+                <Mono style={{ fontSize: 10.5, color: "var(--ink-500)" }}>{g.keys.length}</Mono>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                {g.keys.map((k) => {
+                  const c = CONTACTS[k];
+                  return (
+                    <div key={k} onClick={() => onContact(k)} style={{ padding: "16px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, cursor: "pointer", transition: "border-color 120ms ease, box-shadow 120ms ease", boxShadow: "var(--shadow-sm)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+                    >
+                      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                        <Avatar name={c.name} size={38} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink-900)" }}>{c.name}</div>
+                          <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 2 }}>{c.role}</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {c.handles.slice(0, 2).map((h) => (
+                          <span key={h} style={{ fontSize: 11, color: "var(--ink-700)", background: "var(--ink-100)", padding: "2px 7px", borderRadius: 4 }}>{h}</span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContactDetail({ contactKey, onBack }) {
+  const c = CONTACTS[contactKey];
+  return (
+    <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+    <div style={{ padding: "32px 40px 56px", maxWidth: 760 }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5, marginBottom: 22 }}>
+        <Icon.Back /> Back
+      </button>
+      <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
+        <Avatar name={c.name} size={64} />
+        <div>
+          <div style={{ fontFamily: "var(--font-headline)", fontSize: 24, color: "var(--ink-900)", fontWeight: 700, letterSpacing: -0.4 }}>{c.name}</div>
+          <div style={{ fontSize: 14, color: "var(--ink-700)", marginTop: 2 }}>{c.role}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-500)", marginTop: 2 }}>{c.dept}</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 24, background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+        <ContactRow icon={<Icon.Mail />} label="Email" value={c.email} link={`mailto:${c.email}`} />
+        <ContactRow icon={<Icon.Phone />} label="Phone" value={c.phone} link={`tel:${c.phone.replace(/\D/g, "")}`} borderTop />
+        <ContactRow icon={<Icon.Pin />} label="Office" value={c.office} borderTop />
+        <ContactRow icon={<Icon.Doc />} label="Hours" value={c.hours} borderTop />
+      </div>
+      <div style={{ marginTop: 24 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10 }}>Typically handles</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {c.handles.map((h) => <Pill key={h} tone="outline">{h}</Pill>)}
+        </div>
+      </div>
+    </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// app.jsx — top-level portal shell
+// ─────────────────────────────────────────────
+
+const NavIcon = {
+  Inbox: (p) => (
+    <svg width="16" height="16" viewBox="0 0 15 15" fill="none" {...p}>
+      <path d="M2 10.5h11L11 5H4L2 10.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+      <path d="M2 10.5V13h11v-2.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+      <path d="M5.5 11.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      <path d="M7.5 2v3M5.5 3.5l2-1.5 2 1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  Book: (p) => (
+    <svg width="16" height="16" viewBox="0 0 15 15" fill="none" {...p}>
+      <path d="M3 2.5h6.5c.3 0 .5.2.5.5v9c0 .3-.2.5-.5.5H3a1 1 0 01-1-1V3.5a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2"/>
+      <path d="M9.5 2.5L12 4v9l-2.5-1.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+      <path d="M5 5.5h3M5 7.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  ),
+  Chat: (p) => (
+    <svg width="16" height="16" viewBox="0 0 15 15" fill="none" {...p}>
+      <path d="M2 2.5h11c.3 0 .5.2.5.5v7c0 .3-.2.5-.5.5H5L2 13V3c0-.3.2-.5.5-.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+      <path d="M5 5.5h5M5 7.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  ),
+  Settings: (p) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1.03V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8.6 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.03-.33H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1.03V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15.4 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.37.36.7.64.97.28.28.66.44 1.05.44H21a2 2 0 0 1 0 4h-.09c-.39 0-.77.16-1.05.44-.28.27-.5.6-.64.97z"/>
+    </svg>
+  ),
+  Help: (p) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .5c0 2-2.5 2-2.5 4"/><line x1="12" y1="17" x2="12" y2="17.01"/>
+    </svg>
+  ),
+  Trash: (p) => (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" {...p}>
+      <path d="M2.5 4h10M6 4V2.8h3V4M4 4l.5 8h6l.5-8M6.5 6.3v3.8M8.5 6.3v3.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  LogOut: (p) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+    </svg>
+  ),
+};
+
+function TopBar() {
+  return (
+    <div style={{
+      gridArea: "topbar",
+      background: "white",
+      borderBottom: "1px solid var(--ink-200)",
+      display: "flex",
+      alignItems: "center",
+      padding: "0 18px",
+      gap: 16,
+      zIndex: 10,
+      flexShrink: 0,
+    }}>
+      {/* Brand */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--font-headline)", fontWeight: 700, fontSize: 14, letterSpacing: "-0.01em", flexShrink: 0 }}>
+        <div style={{ width: 26, height: 26, borderRadius: 6, background: "linear-gradient(135deg, var(--purple-700), var(--purple-900))", color: "white", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", letterSpacing: "0.02em", flexShrink: 0 }}>UW</div>
+        <span style={{ color: "var(--ink-900)" }}>Document Triage</span>
+        <span style={{ color: "var(--ink-500)", fontWeight: 500, paddingLeft: 14, marginLeft: 4, borderLeft: "1px solid var(--ink-300)", fontSize: 12.5 }}>Researcher Portal</span>
+      </div>
+      {/* Right: search + bell + avatar */}
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Search */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--ink-100)", border: "1px solid var(--ink-200)", padding: "6px 12px", borderRadius: 6, fontSize: 12.5, color: "var(--ink-500)", width: 240, cursor: "text" }}>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.3"/><path d="M9 9L11.5 11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+          <span style={{ flex: 1 }}>Search…</span>
+          <kbd style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, background: "white", border: "1px solid var(--ink-300)", padding: "1px 5px", borderRadius: 3, color: "var(--ink-500)" }}>⌘K</kbd>
+        </div>
+        {/* Notification bell */}
+        <button style={{ width: 30, height: 30, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-700)", background: "none", border: "none", cursor: "pointer", transition: "background 120ms" }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "var(--ink-100)"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 2a4.5 4.5 0 00-4.5 4.5v2L2 10v1h12v-1l-1.5-1.5v-2A4.5 4.5 0 008 2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+            <path d="M6.5 13a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.3"/>
+          </svg>
+        </button>
+        {/* User avatar only */}
+        <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, var(--purple-500), var(--purple-700))", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0, cursor: "pointer" }}>EM</div>
+      </div>
+    </div>
+  );
+}
+
+function LeftSidebar({ active, setActive, collapsed, dragging, onResizeStart }) {
+  const topTabs = [
+    { id: "My requests",    icon: NavIcon.Inbox },
+    { id: "Knowledge base", icon: NavIcon.Book  },
+    { id: "Messages",       icon: NavIcon.Chat  },
+  ];
+  const bottomActions = [
+    { id: "settings", label: "Settings", icon: NavIcon.Settings },
+    { id: "help", label: "Help", icon: NavIcon.Help },
+    { id: "logout", label: "Log Out", icon: NavIcon.LogOut },
+  ];
+
+  return (
+    <div className={`researcher-sidebar ${collapsed ? "researcher-sidebar-collapsed" : ""}`} data-collapsed={collapsed}>
+      <div className={`researcher-resize-handle ${dragging ? "dragging" : ""}`} onPointerDown={onResizeStart} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} />
+      <nav className="researcher-sidebar-main">
+        {topTabs.map(({ id, icon: NavIc }) => {
+          const a = id === active;
+          return (
+            <button
+              key={id}
+              onClick={() => setActive(id)}
+              className={`researcher-nav-item ${a ? "active" : ""}`}
+              data-tooltip={id}
+              title={collapsed ? id : ""}
+            >
+              <NavIc style={{ color: a ? "var(--purple-700)" : "var(--ink-500)" }} />
+              <span className="researcher-nav-label">{id}</span>
+            </button>
+          );
+        })}
+      </nav>
+      <div className="researcher-sidebar-actions">
+        {bottomActions.map(({ id, label, icon: ActionIcon }) => (
+          <button key={id} className="researcher-nav-item" data-tooltip={label} title={collapsed ? label : ""}>
+            <ActionIcon />
+            <span className="researcher-nav-label">{label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeBase({ mode, setMode }) {
+  const [docId, setDocId] = useState(null);
+  const [contactKey, setContactKey] = useState(null);
+  const [publicDocs, setPublicDocs] = useState(DOC_TYPES);
+
+  useEffect(() => { setDocId(null); setContactKey(null); }, [mode]);
+  useEffect(() => {
+    let alive = true;
+    async function loadPublicDocs() {
+      try {
+        const listRes = await fetch(`${API_BASE}/knowledge-base`);
+        const listData = await listRes.json();
+        const items = listData.items || [];
+        if (!items.length) return;
+        const snapshots = await Promise.all(items.map(async (item) => {
+          const detailRes = await fetch(`${API_BASE}/knowledge-base/${item.id}`);
+          const detailData = await detailRes.json();
+          return detailData.snapshot;
+        }));
+        if (alive) setPublicDocs(snapshots.filter(Boolean).map(snapshotToDoc));
+      } catch {
+        if (alive) setPublicDocs(DOC_TYPES);
+      }
+    }
+    loadPublicDocs();
+    return () => { alive = false; };
+  }, []);
+
+  function handleContact(key) { setMode("contacts"); setContactKey(key); }
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", background: "var(--canvas-bg)" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {mode === "documents" && !docId && <DocumentTypesIndex onPick={setDocId} docs={publicDocs} />}
+        {mode === "documents" && docId && <DocumentDetail docId={docId} docs={publicDocs} onBack={() => setDocId(null)} onContact={handleContact} />}
+        {mode === "contacts" && contactKey && <ContactDetail contactKey={contactKey} onBack={() => setContactKey(null)} />}
+      </div>
+    </div>
+  );
+}
+
+function StubTab({ name, blurb }) {
+  return (
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "var(--ink-500)", padding: 40 }}>
+      <Mono style={{ fontSize: 10.5, letterSpacing: 0.6 }}>STUB</Mono>
+      <div style={{ fontFamily: "var(--font-headline)", fontSize: 22, color: "var(--ink-700)", fontWeight: 700, letterSpacing: -0.3 }}>{name}</div>
+      <div style={{ fontSize: 13, maxWidth: 360, textAlign: "center", lineHeight: 1.5 }}>{blurb}</div>
+    </div>
+  );
+}
+
+function Portal() {
+  const [active, setActive] = useState("Knowledge base");
+  const [kbMode, setKbMode] = useState("documents");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarDragging, setSidebarDragging] = useState(false);
+  const [sidebarDragWidth, setSidebarDragWidth] = useState(null);
+  const sidebarResizeStart = useRef(null);
+  const sidebarDragWidthRef = useRef(null);
+  const sidebarExpandedWidth = 220;
+  const sidebarCollapsedWidth = 56;
+  const sidebarWidth = sidebarDragWidth ?? (sidebarCollapsed ? sidebarCollapsedWidth : sidebarExpandedWidth);
+
+  function handleSetActive(id) {
+    setActive(id);
+    if (id === "Knowledge base") setKbMode("documents");
+  }
+
+  function handleSetKbMode(m) {
+    setKbMode(m);
+    setActive("Knowledge base");
+  }
+
+  function handleSidebarResizeStart(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    sidebarResizeStart.current = { x: e.clientX, width: sidebarWidth, collapsed: sidebarCollapsed };
+    setSidebarDragging(true);
+    sidebarDragWidthRef.current = sidebarWidth;
+    setSidebarDragWidth(sidebarWidth);
+    document.body.style.cursor = "col-resize";
+
+    const handlePointerMove = (moveEvent) => {
+      const start = sidebarResizeStart.current;
+      if (!start) return;
+      const delta = moveEvent.clientX - start.x;
+      const nextWidth = Math.max(sidebarCollapsedWidth, Math.min(sidebarExpandedWidth, start.width + delta));
+      sidebarDragWidthRef.current = nextWidth;
+      setSidebarDragWidth(nextWidth);
+    };
+
+    const handlePointerUp = (upEvent) => {
+      const start = sidebarResizeStart.current;
+      const finalWidth = sidebarDragWidthRef.current ?? (start ? start.width : sidebarWidth);
+      if (start && Math.abs(upEvent.clientX - start.x) < 8) {
+        setSidebarCollapsed(!start.collapsed);
+      } else {
+        const midpoint = (sidebarExpandedWidth + sidebarCollapsedWidth) / 2;
+        setSidebarCollapsed(finalWidth < midpoint);
+      }
+
+      sidebarResizeStart.current = null;
+      sidebarDragWidthRef.current = null;
+      setSidebarDragging(false);
+      setSidebarDragWidth(null);
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }
+
+  useEffect(() => () => {
+    document.body.style.cursor = "";
+  }, []);
+
+  return (
+    <div className="portal-shell" style={{ "--sidebar-w": `${sidebarWidth}px` }}>
+      <TopBar />
+      <LeftSidebar active={active} setActive={handleSetActive} collapsed={sidebarCollapsed} dragging={sidebarDragging} onResizeStart={handleSidebarResizeStart} />
+      <div style={{ gridArea: "main", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+        {active === "Knowledge base" && <KnowledgeBase mode={kbMode} setMode={handleSetKbMode} />}
+        {active === "My requests" && <StubTab name="My requests" blurb="In-flight and submitted document requests across all offices live here. Out of scope for this prototype." />}
+        {active === "Messages" && <StubTab name="Messages" blurb="Threaded conversations with the offices handling your requests. Out of scope for this prototype." />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Portal />);
+  </script>
+</body>
+</html>
