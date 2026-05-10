@@ -435,15 +435,20 @@ function normalizeAiGraph(raw, input) {
       answers,
     };
   });
-  const edges = raw.edges.map((e) => ({
-    id: id('edge'),
-    sourceNodeId: nodeIdByTemp.get(e.sourceNodeTempId || e.sourceNodeId || e.from || e.source),
-    sourceAnswerId: (e.sourceAnswerTempId || e.sourceAnswerId || e.answer || e.condition)
-      ? answerIdByTemp.get(e.sourceAnswerTempId || e.sourceAnswerId || e.answer || e.condition) || null
-      : null,
-    targetNodeId: nodeIdByTemp.get(e.targetNodeTempId || e.targetNodeId || e.to || e.target),
-    isDeletable: true,
-  })).filter((e) => e.sourceNodeId && e.targetNodeId);
+  const edges = raw.edges.map((e) => {
+    const resolvedSourceId = nodeIdByTemp.get(e.sourceNodeTempId || e.sourceNodeId || e.from || e.source);
+    const resolvedTargetId = nodeIdByTemp.get(e.targetNodeTempId || e.targetNodeId || e.to || e.target);
+    const sourceNode = nodes.find((n) => n.id === resolvedSourceId);
+    return {
+      id: id('edge'),
+      sourceNodeId: resolvedSourceId,
+      sourceAnswerId: (e.sourceAnswerTempId || e.sourceAnswerId || e.answer || e.condition)
+        ? answerIdByTemp.get(e.sourceAnswerTempId || e.sourceAnswerId || e.answer || e.condition) || null
+        : null,
+      targetNodeId: resolvedTargetId,
+      isDeletable: sourceNode?.type !== NodeType.DEFINITION,
+    };
+  }).filter((e) => e.sourceNodeId && e.targetNodeId);
   if (!nodes.some((n) => n.type === NodeType.DEFINITION)) {
     throw new Error('AI response did not include a DEFINITION node.');
   }
