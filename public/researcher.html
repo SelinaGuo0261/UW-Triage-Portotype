@@ -1443,35 +1443,21 @@ function StepResults({ steps, situationOverrides, onSituationChange, onContact }
 // customize.jsx — customization panel
 // ─────────────────────────────────────────────
 
-function CustomizePanel({ doc, answers, onApply }) {
-  const [draft, setDraft] = useState(answers);
-  const [editingId, setEditingId] = useState(null);
-
-  useEffect(() => { setDraft(answers); setEditingId(null); }, [answers]);
-
-  const dirty = JSON.stringify(draft) !== JSON.stringify(answers);
-
-  function setVal(qid, v) { setDraft({ ...draft, [qid]: v }); setEditingId(null); }
-
+function CustomizePanel({ doc, answers }) {
   return (
     <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
       <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid var(--ink-200)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Stage 3</Mono>
           <div style={{ fontFamily: "var(--font-headline)", fontSize: 16, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2 }}>
-            Customize your information
+            Your choice
           </div>
-        </div>
-        <div style={{ marginTop: 4, fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>
-          Edit any answer below and re-apply to regenerate the signing flow without losing context.
         </div>
       </div>
 
       <div style={{ padding: "6px 0" }}>
         {doc.flow.questions.map((q, i) => {
-          const v = draft[q.id];
-          const opt = q.options.find((o) => o.value === v);
-          const isEditing = editingId === q.id;
+          const opt = q.options.find((o) => o.value === answers[q.id]);
           return (
             <div key={q.id} style={{ padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid var(--ink-200)", display: "flex", gap: 16, alignItems: "flex-start" }}>
               <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5, marginTop: 4, flexShrink: 0, width: 26 }}>
@@ -1479,44 +1465,15 @@ function CustomizePanel({ doc, answers, onApply }) {
               </Mono>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.4 }}>{q.title}</div>
-                {!isEditing ? (
-                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13.5, color: "var(--ink-900)", fontWeight: 500 }}>
-                      {opt ? opt.label : <span style={{ color: "var(--ink-500)", fontWeight: 400, fontStyle: "italic" }}>Not answered</span>}
-                    </span>
-                    <button onClick={() => setEditingId(q.id)} style={{ ...linkBtn, fontSize: 12 }}>
-                      <Icon.Edit /> Change
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
-                    {q.options.map((o) => {
-                      const sel = v === o.value;
-                      return (
-                        <button key={o.value} onClick={() => setVal(q.id, o.value)} style={{
-                          textAlign: "left", padding: "8px 12px",
-                          background: sel ? "var(--purple-50)" : "white",
-                          border: `1px solid ${sel ? "var(--purple-700)" : "var(--ink-200)"}`,
-                          borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: "var(--ink-900)",
-                        }}>{o.label}</button>
-                      );
-                    })}
-                    <button onClick={() => setEditingId(null)} style={{ ...linkBtn, fontSize: 12, alignSelf: "flex-start", marginTop: 2 }}>Cancel</button>
-                  </div>
-                )}
+                <div style={{ marginTop: 4 }}>
+                  <span style={{ fontSize: 13.5, color: "var(--ink-900)", fontWeight: 500 }}>
+                    {opt ? opt.label : <span style={{ color: "var(--ink-500)", fontWeight: 400, fontStyle: "italic" }}>Not answered</span>}
+                  </span>
+                </div>
               </div>
             </div>
           );
         })}
-      </div>
-
-      <div style={{ padding: "12px 20px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-        <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
-          {dirty ? "Answers changed — apply to regenerate the flow." : "Answers match the current flow."}
-        </div>
-        <button onClick={() => onApply(draft)} disabled={!dirty} style={{ ...primaryBtn, opacity: dirty ? 1 : 0.4, cursor: dirty ? "pointer" : "not-allowed" }}>
-          <Icon.Refresh /> Apply changes
-        </button>
       </div>
     </div>
   );
@@ -1593,6 +1550,7 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
   const [stage, setStage] = useState("questions");
   const [answers, setAnswers] = useState({});
   const [situationOverrides, setSituationOverrides] = useState({});
+  const isBackendFlow = Boolean(doc?._snapshot);
 
   const steps = useMemo(() => {
     if (stage !== "results") return [];
@@ -1673,7 +1631,6 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
                   <CustomizePanel
                     doc={doc}
                     answers={answers}
-                    onApply={(newAnswers) => { setAnswers(newAnswers); setSituationOverrides({}); }}
                   />
                 </div>
               </>
@@ -1912,7 +1869,6 @@ function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
                     <CustomizePanel
                       doc={doc}
                       answers={answers}
-                      onApply={(newAnswers) => { setAnswers(newAnswers); setSituationOverrides({}); }}
                     />
                   </div>
                 </>
