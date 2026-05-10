@@ -1108,6 +1108,7 @@ function snapshotToDoc(snapshot) {
         options: (node.answers || []).map((answer) => ({ value: answer.id, label: answer.text })),
       })),
       compute(answers) {
+        // 保持原有 compute 不变，供 static DOC_TYPES 的 CustomizePanel 使用
         const steps = [];
         const definitionEdge = edges.find((edge) => edge.sourceNodeId === definition?.id);
         let current = nodeById[definitionEdge?.targetNodeId];
@@ -1131,7 +1132,101 @@ function snapshotToDoc(snapshot) {
         return steps;
       },
     },
+    _snapshot: snapshot,   // ← 新增：供 GraphDocWizard 使用
   };
+}
+
+// ─────────────────────────────────────────────
+// GraphDocWizard — 基于图遍历的向导（用于 backend 发布的 flow）
+// ─────────────────────────────────────────────
+
+function GraphDocWizard({ snapshot, onResult, onCancel }) {
+  const graph = snapshot?.snapshotJson || {};
+  const nodes = graph.nodes || [];
+  const edges = graph.edges || [];
+  const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+
+  const definition = nodes.find((n) => n.type === "DEFINITION");
+  const rootEdge = edges.find((e) => e.sourceNodeId === definition?.id);
+  const rootNode = nodeById[rootEdge?.targetNodeId];
+
+  const [currentNode, setCurrentNode] = React.useState(rootNode);
+  const [path, setPath] = React.useState([]);  // { node, answerId }[]
+
+  if (!rootNode) return (
+    <div style={{ padding: 20, color: "var(--ink-500)", fontSize: 13 }}>
+      Flow structure invalid: no root decision node found.
+    </div>
+  );
+
+  function pick(answerId) {
+    const nextEdge = edges.find(
+      (e) => e.sourceNodeId === currentNode.id && e.sourceAnswerId === answerId
+    );
+    const nextNode = nodeById[nextEdge?.targetNodeId];
+    if (!nextNode) return;
+
+    const newPath = [...path, { node: currentNode, answerId }];
+    setPath(newPath);
+
+    if (nextNode.type === "ACTION") {
+      onResult(nextNode, newPath);   // 到达终态，交给父组件展示结果
+    } else {
+      setCurrentNode(nextNode);
+    }
+  }
+
+  function back() {
+    if (path.length === 0) { onCancel(); return; }
+    const prev = path[path.length - 1];
+    setPath(path.slice(0, -1));
+    setCurrentNode(prev.node);
+  }
+
+  const stepNum = path.length + 1;
+  const stepOptions = (currentNode.answers || []).map((a) => ({ value: a.id, label: a.text }));
+
+  return (
+    <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+      <div style={{ padding: "20px 28px 0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <button onClick={back} style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "var(--ink-700)", fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+            <Icon.Back /> {path.length === 0 ? "Cancel" : "Back"}
+          </button>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5 }}>
+            QUESTION {String(stepNum).padStart(2, "0")}
+          </Mono>
+        </div>
+      </div>
+
+      <div style={{ padding: "28px 28px 8px" }}>
+        <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, lineHeight: 1.3, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700 }}>
+          {currentNode.content?.question || currentNode.label}
+        </div>
+        <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+          {stepOptions.map((opt, i) => (
+            <button key={opt.value} onClick={() => pick(opt.value)} style={{
+              textAlign: "left", display: "flex", alignItems: "flex-start", gap: 12,
+              padding: "11px 14px", background: "white",
+              border: "1px solid var(--ink-200)", borderRadius: 6, cursor: "pointer",
+              fontFamily: "inherit",
+            }}>
+              <div style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 4, border: "1px solid var(--ink-300)", color: "var(--ink-700)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, marginTop: 1 }}>
+                {String.fromCharCode(65 + i)}
+              </div>
+              <div style={{ flex: 1, fontSize: 13.5, fontWeight: 500, lineHeight: 1.4, color: "var(--ink-900)" }}>{opt.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 20, padding: "12px 28px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)" }}>
+        <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
+          Step {stepNum} · select an option above to continue
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -1549,7 +1644,14 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
 
           <div style={{ marginTop: 16 }}>
             {stage === "questions" ? (
-              <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
+              <>
+                {isBackendFlow && (
+                  <GraphDocWizard snapshot={doc._snapshot} onResult={(actionNode) => { setStage("results"); }} onCancel={() => setStage("questions")} />
+                )}
+                {!isBackendFlow && (
+                  <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
+                )}
+              </>
             ) : (
               <>
                 <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, flexWrap: "wrap", boxShadow: "var(--shadow-sm)" }}>
@@ -1635,15 +1737,28 @@ function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
   const [stage, setStage] = useState("questions");
   const [answers, setAnswers] = useState({});
   const [situationOverrides, setSituationOverrides] = useState({});
+  const [graphResultNode, setGraphResultNode] = useState(null);  // ← 新增
+
+  // backend flow 走 GraphDocWizard，static DOC_TYPES 走原有 compute
+  const isBackendFlow = Boolean(doc?._snapshot);
 
   const steps = useMemo(() => {
     if (stage !== "results") return [];
+    if (isBackendFlow && graphResultNode) {
+      // 把 ACTION node 转成 StepResults 需要的格式
+      return [{
+        office: graphResultNode.content?.assignee || "UW CoMotion",
+        contact: "comotion_legal",
+        action: graphResultNode.content?.title || graphResultNode.label,
+        materials: (graphResultNode.content?.materials || []).map((m) => m.label),
+      }];
+    }
     return doc.flow.compute({ ...answers, ...situationOverrides });
-  }, [stage, answers, situationOverrides, doc]);
+  }, [stage, answers, situationOverrides, doc, isBackendFlow, graphResultNode]);
 
   function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
-  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); }
-
+  function handleGraphResult(actionNode) { setGraphResultNode(actionNode); setStage("results"); }  // ← 新增
+  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultNode(null); }
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--canvas-bg)" }}>
       <div style={{
@@ -1768,7 +1883,14 @@ function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
 
             <div style={{ marginTop: 16 }}>
               {stage === "questions" ? (
-                <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
+                <>
+                  {isBackendFlow && (
+                    <GraphDocWizard snapshot={doc._snapshot} onResult={handleGraphResult} onCancel={() => setStage("questions")} />
+                  )}
+                  {!isBackendFlow && (
+                    <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
+                  )}
+                </>
               ) : (
                 <>
                   <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, flexWrap: "wrap", boxShadow: "var(--shadow-sm)" }}>
