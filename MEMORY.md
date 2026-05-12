@@ -14,14 +14,46 @@ Important rule: **do not modify the original reference files unless explicitly a
 /Users/selinaguo/Desktop/vibe codings/uw_comotion_legal_agreement_triage/
 ```
 
-This prototype folder contains copied UI shells:
+## File Structure
+
+The codebase was refactored from two monolithic HTML files into a multi-file structure. HTML shells are ~20 lines each; all logic lives in separate CSS and JS files.
 
 ```txt
-public/admin.html
-public/researcher.html
+public/
+├── admin.html               ← HTML shell (~20 lines), loads css + js
+├── researcher.html          ← HTML shell (~23 lines), loads css + js
+├── css/
+│   ├── admin.css            ← all admin CSS (524 lines)
+│   └── researcher.css       ← all researcher CSS (222 lines)
+└── js/
+    ├── admin/
+    │   ├── helpers.js       ← hooks destructure, Icon, AVATAR_COLORS, colorFor,
+    │   │                      SEED_NODES/EDGES, NODE_W, API_BASE, FLOW_CARDS,
+    │   │                      backendFlowToBuilderGraph, autoLayoutBuilderGraph,
+    │   │                      builderGraphToBackendFlow, nodeHeight, portPos, bezier
+    │   ├── components.js    ← all React components: MaterialRow, AssigneeField,
+    │   │                      NodeView, ManagePeopleRow, FlowCanvas, PreviewPanel,
+    │   │                      InspectSettings, RightPanel, InviteModal, PublishModal,
+    │   │                      MiniFlowPreview, NewFlowModal, FlowLibrary, TrashPage
+    │   └── app.js           ← App component + ReactDOM.createRoot
+    └── researcher/
+        ├── helpers.js       ← hooks destructure, Hairline/Mono/Pill/Avatar, Icon,
+        │                      primaryBtn/ghostBtn/linkBtn style consts, CONTACTS,
+        │                      OFFICE_GROUPS, DOC_TYPES, DOC_BY_ID, API_BASE,
+        │                      snapshotToDoc
+        ├── components.js    ← GraphDocWizard, DocWizard, StepCard, StepResults,
+        │                      CustomizePanel, DocumentTypesIndex,
+        │                      DocumentDetailPreviousDraft, DocumentDetail,
+        │                      ContactRow, ContactDirectory, ContactDetail,
+        │                      NavIcon, TopBar, LeftSidebar
+        └── app.js           ← KnowledgeBase, StubTab, Portal + ReactDOM.createRoot
 ```
 
-These copied files must follow the reference UI strictly. Layout, menu, canvas, modal, cards, and spacing should stay visually matched to the original HTML demos. Backend/data behavior can be wired behind existing controls.
+### How the multi-file setup works (no bundler)
+
+Babel standalone (`@babel/standalone@7.29.0`) fetches and executes `<script type="text/babel" src="...">` files via synchronous XHR in DOM order. It also transforms `const` → `var`, so every top-level declaration becomes a global available to later files. Files must be loaded in dependency order (helpers → components → app).
+
+When editing JS: target the specific file in `public/js/`. Do not edit the HTML shells for logic changes.
 
 ## Run
 
@@ -121,13 +153,16 @@ If Claude returns malformed JSON, the full error stays visible inside the Create
 
 ## Builder Admin Wiring
 
-File:
+Files:
 
 ```txt
-public/admin.html
+public/js/admin/helpers.js     ← adapters + constants
+public/js/admin/components.js  ← all canvas/node/panel/modal components
+public/js/admin/app.js         ← App root + mount
+public/css/admin.css           ← all styles
 ```
 
-Important adapters:
+Important adapters (in `helpers.js`):
 
 ```js
 backendFlowToBuilderGraph(flow)
@@ -166,64 +201,56 @@ Publish behavior:
 Library persistence:
 
 - On Admin load, `GET /api/flows` populates saved/generated backend flow cards.
-- Static sample cards remain UI-only demos.
-- Static default `MTA Triage Flow` was changed from `published` to `draft` so Admin status matches Researcher visibility.
 - Only backend-published `PUBLIC` snapshots should appear in Researcher.
 
 Move to Trash:
 
-- Right-click a saved/generated flow card to open a context menu beside cursor:
-
-```txt
-Open
-Share
-Rename
-Move to Trash
-```
-
+- Right-click a saved/generated flow card → context menu with Open / Share / Rename / Move to Trash.
 - `Move to Trash` calls `DELETE /api/flows/:id`.
-- Backend soft-deletes by setting `trashedAt`, clears `publishScope`, sets status to `DRAFT`, and removes any `PublishedSnapshot`.
-- Result: published trashed flow disappears from researcher portal.
+- Backend soft-deletes: sets `trashedAt`, clears `publishScope`, sets status to `DRAFT`, removes `PublishedSnapshot`.
 - Bottom-left sidebar `Trash` opens `TrashPage`, listing `GET /api/flows?trash=1`.
 - Trash currently lists trashed flows only; restore/permanent delete are not implemented yet.
 
 ## Researcher Wiring
 
-File:
+Files:
 
 ```txt
-public/researcher.html
+public/js/researcher/helpers.js     ← constants, primitives, snapshotToDoc
+public/js/researcher/components.js  ← wizard, results, document/contact detail
+public/js/researcher/app.js         ← KnowledgeBase, Portal, mount
+public/css/researcher.css           ← all styles
 ```
-
-The researcher UI is still the copied reference shell. Do not visually redesign it.
 
 Backend public data:
 
 - `KnowledgeBase` loads `GET /api/knowledge-base`.
 - For each item, loads `GET /api/knowledge-base/:id`.
-- `snapshotToDoc(snapshot)` adapts published snapshot into the existing `DOC_TYPES`-like shape.
-- If no backend public flows exist, it falls back to static `DOC_TYPES`.
+- `snapshotToDoc(snapshot)` (in `helpers.js`) adapts published snapshot into doc shape.
+- If API returns no items, publicDocs stays `[]` (no static fallback).
 
 Researcher visibility:
 
-- Only `PUBLISHED` flows with `publishScope = PUBLIC` should be exposed through `/api/knowledge-base`.
+- Only `PUBLISHED` flows with `publishScope = PUBLIC` are exposed through `/api/knowledge-base`.
 - `INTERNAL`, `DRAFT`, and trashed flows must not show in Researcher.
+
+### Stage 3 "Your Choice" branching (fixed 2026-05-11)
+
+`GraphDocWizard` passes `(actionNode, path)` to `onResult`. `DocumentDetail` stores `graphPath` and derives:
+
+- `customizeQuestions` — questions in traversal order (from `graphPath`, not `doc.flow.questions`)
+- `customizeAnswers` — `{ [nodeId]: answerId }` from the path
+
+`CustomizePanel` receives `questions` + `answers` props (not `doc`). This ensures Stage 3 shows only the questions the user actually answered, in the correct order, with the correct selected values.
 
 Knowledge Base card grid:
 
-- Must always show four equal-size cards per row regardless of sidebar collapsed/expanded.
-- Current grid uses:
-
-```js
-gridTemplateColumns: "repeat(4, minmax(0, 1fr))"
-```
-
-- Cards use `minWidth: 0`; long titles use `overflowWrap: "anywhere"`.
+- Must always show four equal-size cards per row regardless of sidebar state.
+- Grid: `gridTemplateColumns: "repeat(4, minmax(0, 1fr))"`, cards use `minWidth: 0`.
 
 ## Known Current Issues / Next Likely Work
 
-- Need to test the full Claude path after latest JSON repair changes with an actual Anthropic key.
-- If Claude still returns malformed JSON, capture the persistent modal error and adjust prompt/parser.
+- Need to test the full Claude path with an actual Anthropic key.
 - Trash has no restore/permanent delete yet.
-- Right-click menu applies mainly to backend/generated flow cards for destructive actions.
+- `DocumentDetailPreviousDraft` and `InspectSettings` are dead code — not reachable from UI but still in `components.js`.
 - Backend is a local prototype, not the final Next.js/Prisma implementation from the DOCX.

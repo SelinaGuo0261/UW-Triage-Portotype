@@ -1,6 +1,298 @@
 {
   "flows": [
     {
+      "id": "flow_6f04bd60",
+      "name": "MTA-test2",
+      "description": "Triage workflow for UW CoMotion Material Transfer Agreements (MTAs), guiding staff through agreement type identification and routing.",
+      "status": "PUBLISHED",
+      "publishScope": "PUBLIC",
+      "aiStatus": "AI_READY",
+      "aiError": null,
+      "version": 2,
+      "sourceUrl": null,
+      "sourceFile": "UW_CoMotion_MTA_Triage_Rationale.pdf",
+      "createdById": "demo-admin",
+      "nodes": [
+        {
+          "id": "node_2846c15b",
+          "type": "DEFINITION",
+          "label": "UW CoMotion MTA Triage",
+          "content": {
+            "description": "This flow triages incoming Material Transfer Agreement (MTA) requests at UW CoMotion, determining whether materials are incoming or outgoing, identifying the agreement type, and routing to the appropriate action.",
+            "relatedOffices": [
+              "UW CoMotion",
+              "Office of Research",
+              "UW Tech Transfer"
+            ],
+            "templates": [
+              "UW Incoming MTA Template",
+              "UW Outgoing MTA Template",
+              "UBMTA Letter of Implementation"
+            ],
+            "resources": [
+              "CoMotion MTA Guidelines",
+              "NIH Simple Letter Agreement",
+              "UBMTA Master Agreement"
+            ]
+          },
+          "posX": -310,
+          "posY": 80,
+          "isDeletable": false,
+          "answers": []
+        },
+        {
+          "id": "node_3735e03b",
+          "type": "DECISION",
+          "label": "Direction of Material Transfer",
+          "content": {
+            "question": "Direction of Material Transfer"
+          },
+          "posX": 20,
+          "posY": 80,
+          "isDeletable": true,
+          "answers": [
+            {
+              "id": "ans_54400bb8",
+              "text": "Incoming: UW is receiving materials from an external party",
+              "order": 0
+            },
+            {
+              "id": "ans_393b3bb6",
+              "text": "Outgoing: UW is providing materials to an external party",
+              "order": 1
+            }
+          ]
+        },
+        {
+          "id": "node_a90ec237",
+          "type": "DECISION",
+          "label": "Incoming MTA Agreement Type",
+          "content": {
+            "question": "Incoming MTA Agreement Type"
+          },
+          "posX": 350,
+          "posY": 80,
+          "isDeletable": true,
+          "answers": [
+            {
+              "id": "ans_1a6f83f3",
+              "text": "Provider uses UBMTA or NIH Simple Letter Agreement",
+              "order": 0
+            },
+            {
+              "id": "ans_65c266b1",
+              "text": "Provider requires their own custom agreement",
+              "order": 1
+            }
+          ]
+        },
+        {
+          "id": "node_131e182d",
+          "type": "DECISION",
+          "label": "Outgoing MTA Agreement Type",
+          "content": {
+            "question": "Outgoing MTA Agreement Type"
+          },
+          "posX": 350,
+          "posY": 330,
+          "isDeletable": true,
+          "answers": [
+            {
+              "id": "ans_10bf4d98",
+              "text": "Recipient accepts UBMTA or UW standard terms",
+              "order": 0
+            },
+            {
+              "id": "ans_9035a3c6",
+              "text": "Recipient requests custom or negotiated terms",
+              "order": 1
+            }
+          ]
+        },
+        {
+          "id": "node_24dc9d50",
+          "type": "ACTION",
+          "label": "Execute Incoming MTA Using Standard Template",
+          "content": {
+            "title": "Execute Incoming MTA Using Standard Template",
+            "description": "Use the UBMTA Letter of Implementation or NIH Simple Letter Agreement. Confirm PI details, material description, and permitted use. Route for signature to authorized UW signatory.",
+            "assigneeKind": "office",
+            "assignee": "CoMotion MTA Specialist",
+            "materials": [
+              {
+                "id": "mat-0.7041067544628662",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              },
+              {
+                "id": "mat-0.5907325429164139",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              },
+              {
+                "id": "mat-0.686853083599611",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              }
+            ]
+          },
+          "posX": 680,
+          "posY": 80,
+          "isDeletable": true,
+          "answers": []
+        },
+        {
+          "id": "node_c5488f5a",
+          "type": "ACTION",
+          "label": "Review and Negotiate Provider Custom Incoming MTA",
+          "content": {
+            "title": "Review and Negotiate Provider Custom Incoming MTA",
+            "description": "Review provider-supplied agreement for IP ownership, publication rights, and permitted use clauses. Negotiate terms with provider and route for legal review if needed before UW authorized signature.",
+            "assigneeKind": "office",
+            "assignee": "CoMotion MTA Contracts Officer",
+            "materials": [
+              {
+                "id": "mat-0.3928513917366403",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              },
+              {
+                "id": "mat-0.45955315277897324",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              }
+            ]
+          },
+          "posX": 680,
+          "posY": 330,
+          "isDeletable": true,
+          "answers": []
+        },
+        {
+          "id": "node_e16d8bd7",
+          "type": "ACTION",
+          "label": "Execute Outgoing MTA Using UW Standard or UBMTA Terms",
+          "content": {
+            "title": "Execute Outgoing MTA Using UW Standard or UBMTA Terms",
+            "description": "Prepare the outgoing MTA using UW standard outgoing template or UBMTA Letter of Implementation. Confirm material description, recipient PI, and permitted use. Obtain PI approval and UW authorized signature.",
+            "assigneeKind": "office",
+            "assignee": "CoMotion MTA Specialist",
+            "materials": [
+              {
+                "id": "mat-0.6705505911488523",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              },
+              {
+                "id": "mat-0.6730676262124561",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              },
+              {
+                "id": "mat-0.17296759208192602",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              }
+            ]
+          },
+          "posX": 680,
+          "posY": 580,
+          "isDeletable": true,
+          "answers": []
+        },
+        {
+          "id": "node_1596b39a",
+          "type": "ACTION",
+          "label": "Review and Negotiate Recipient Custom Outgoing MTA Terms",
+          "content": {
+            "title": "Review and Negotiate Recipient Custom Outgoing MTA Terms",
+            "description": "Evaluate recipient-proposed custom terms for IP, publication, and sublicensing provisions. Negotiate to protect UW interests, involve CoMotion legal counsel as needed, and route for authorized UW signature.",
+            "assigneeKind": "office",
+            "assignee": "CoMotion MTA Contracts Officer",
+            "materials": [
+              {
+                "id": "mat-0.14224336508844682",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              },
+              {
+                "id": "mat-0.7663291637011213",
+                "label": "Material",
+                "attachKind": null,
+                "attachValue": ""
+              }
+            ]
+          },
+          "posX": 680,
+          "posY": 830,
+          "isDeletable": true,
+          "answers": []
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_49a9e9bd",
+          "sourceNodeId": "node_2846c15b",
+          "sourceAnswerId": "ans_f343f166",
+          "targetNodeId": "node_3735e03b",
+          "isDeletable": false
+        },
+        {
+          "id": "edge_ef6a90b2",
+          "sourceNodeId": "node_3735e03b",
+          "sourceAnswerId": "ans_54400bb8",
+          "targetNodeId": "node_a90ec237",
+          "isDeletable": true
+        },
+        {
+          "id": "edge_7a5b9d55",
+          "sourceNodeId": "node_3735e03b",
+          "sourceAnswerId": "ans_393b3bb6",
+          "targetNodeId": "node_131e182d",
+          "isDeletable": true
+        },
+        {
+          "id": "edge_797a7d59",
+          "sourceNodeId": "node_a90ec237",
+          "sourceAnswerId": "ans_1a6f83f3",
+          "targetNodeId": "node_24dc9d50",
+          "isDeletable": true
+        },
+        {
+          "id": "edge_9e3ec9cc",
+          "sourceNodeId": "node_a90ec237",
+          "sourceAnswerId": "ans_65c266b1",
+          "targetNodeId": "node_c5488f5a",
+          "isDeletable": true
+        },
+        {
+          "id": "edge_dd72a98d",
+          "sourceNodeId": "node_131e182d",
+          "sourceAnswerId": "ans_10bf4d98",
+          "targetNodeId": "node_e16d8bd7",
+          "isDeletable": true
+        },
+        {
+          "id": "edge_909e4b73",
+          "sourceNodeId": "node_131e182d",
+          "sourceAnswerId": "ans_9035a3c6",
+          "targetNodeId": "node_1596b39a",
+          "isDeletable": true
+        }
+      ],
+      "createdAt": "2026-05-12T07:32:53.973Z",
+      "updatedAt": "2026-05-12T07:33:11.175Z"
+    },
+    {
       "id": "flow_9b35e53f",
       "name": "UW_CoMotion_MTA_Triage_Rationale",
       "description": "Triage flow for UW CoMotion Material Transfer Agreement (MTA) requests, guiding staff through categorization and assignment of incoming MTA inquiries.",
@@ -581,7 +873,7 @@
       "publishScope": "PUBLIC",
       "aiStatus": "AI_READY",
       "aiError": null,
-      "version": 4,
+      "version": 6,
       "sourceUrl": null,
       "sourceFile": "UW_CoMotion_MTA_Triage_Rationale.pdf",
       "createdById": "demo-admin",
@@ -624,8 +916,8 @@
           "content": {
             "question": "Is the UW sending materials to an external party (Outgoing) or receiving materials from an external party (Incoming)?"
           },
-          "posX": 20,
-          "posY": 80,
+          "posX": -145.39453125,
+          "posY": 153.7109375,
           "isDeletable": true,
           "answers": [
             {
@@ -670,8 +962,8 @@
           "content": {
             "question": "Is the biological material eligible for transfer under the Uniform Biological Material Transfer Agreement (UBMTA), and is the receiving institution a UBMTA signatory?"
           },
-          "posX": 680,
-          "posY": 80,
+          "posX": 834.2578125,
+          "posY": 29.13671875,
           "isDeletable": true,
           "answers": [
             {
@@ -756,8 +1048,8 @@
               }
             ]
           },
-          "posX": 1010,
-          "posY": 80,
+          "posX": 1292.0546875,
+          "posY": -62.09765625,
           "isDeletable": true,
           "answers": []
         },
@@ -779,8 +1071,8 @@
               }
             ]
           },
-          "posX": 1010,
-          "posY": 330,
+          "posX": 1195.88671875,
+          "posY": 290.515625,
           "isDeletable": true,
           "answers": []
         },
@@ -969,7 +1261,7 @@
         }
       ],
       "createdAt": "2026-05-02T23:46:59.396Z",
-      "updatedAt": "2026-05-07T02:43:17.315Z"
+      "updatedAt": "2026-05-10T03:51:06.451Z"
     },
     {
       "id": "flow_aa758e65",
@@ -1479,16 +1771,308 @@
   ],
   "publishedSnapshots": [
     {
-      "id": "snapshot_96d52680",
+      "id": "snapshot_3ba60c68",
+      "flowId": "flow_6f04bd60",
+      "version": 2,
+      "publishScope": "PUBLIC",
+      "snapshotJson": {
+        "flow": {
+          "id": "flow_6f04bd60",
+          "name": "MTA-test2",
+          "description": "Triage workflow for UW CoMotion Material Transfer Agreements (MTAs), guiding staff through agreement type identification and routing.",
+          "version": 2
+        },
+        "nodes": [
+          {
+            "id": "node_2846c15b",
+            "type": "DEFINITION",
+            "label": "UW CoMotion MTA Triage",
+            "content": {
+              "description": "This flow triages incoming Material Transfer Agreement (MTA) requests at UW CoMotion, determining whether materials are incoming or outgoing, identifying the agreement type, and routing to the appropriate action.",
+              "relatedOffices": [
+                "UW CoMotion",
+                "Office of Research",
+                "UW Tech Transfer"
+              ],
+              "templates": [
+                "UW Incoming MTA Template",
+                "UW Outgoing MTA Template",
+                "UBMTA Letter of Implementation"
+              ],
+              "resources": [
+                "CoMotion MTA Guidelines",
+                "NIH Simple Letter Agreement",
+                "UBMTA Master Agreement"
+              ]
+            },
+            "posX": -310,
+            "posY": 80,
+            "isDeletable": false,
+            "answers": []
+          },
+          {
+            "id": "node_3735e03b",
+            "type": "DECISION",
+            "label": "Direction of Material Transfer",
+            "content": {
+              "question": "Direction of Material Transfer"
+            },
+            "posX": 20,
+            "posY": 80,
+            "isDeletable": true,
+            "answers": [
+              {
+                "id": "ans_54400bb8",
+                "text": "Incoming: UW is receiving materials from an external party",
+                "order": 0
+              },
+              {
+                "id": "ans_393b3bb6",
+                "text": "Outgoing: UW is providing materials to an external party",
+                "order": 1
+              }
+            ]
+          },
+          {
+            "id": "node_a90ec237",
+            "type": "DECISION",
+            "label": "Incoming MTA Agreement Type",
+            "content": {
+              "question": "Incoming MTA Agreement Type"
+            },
+            "posX": 350,
+            "posY": 80,
+            "isDeletable": true,
+            "answers": [
+              {
+                "id": "ans_1a6f83f3",
+                "text": "Provider uses UBMTA or NIH Simple Letter Agreement",
+                "order": 0
+              },
+              {
+                "id": "ans_65c266b1",
+                "text": "Provider requires their own custom agreement",
+                "order": 1
+              }
+            ]
+          },
+          {
+            "id": "node_131e182d",
+            "type": "DECISION",
+            "label": "Outgoing MTA Agreement Type",
+            "content": {
+              "question": "Outgoing MTA Agreement Type"
+            },
+            "posX": 350,
+            "posY": 330,
+            "isDeletable": true,
+            "answers": [
+              {
+                "id": "ans_10bf4d98",
+                "text": "Recipient accepts UBMTA or UW standard terms",
+                "order": 0
+              },
+              {
+                "id": "ans_9035a3c6",
+                "text": "Recipient requests custom or negotiated terms",
+                "order": 1
+              }
+            ]
+          },
+          {
+            "id": "node_24dc9d50",
+            "type": "ACTION",
+            "label": "Execute Incoming MTA Using Standard Template",
+            "content": {
+              "title": "Execute Incoming MTA Using Standard Template",
+              "description": "Use the UBMTA Letter of Implementation or NIH Simple Letter Agreement. Confirm PI details, material description, and permitted use. Route for signature to authorized UW signatory.",
+              "assigneeKind": "office",
+              "assignee": "CoMotion MTA Specialist",
+              "materials": [
+                {
+                  "id": "mat-0.7041067544628662",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                },
+                {
+                  "id": "mat-0.5907325429164139",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                },
+                {
+                  "id": "mat-0.686853083599611",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                }
+              ]
+            },
+            "posX": 680,
+            "posY": 80,
+            "isDeletable": true,
+            "answers": []
+          },
+          {
+            "id": "node_c5488f5a",
+            "type": "ACTION",
+            "label": "Review and Negotiate Provider Custom Incoming MTA",
+            "content": {
+              "title": "Review and Negotiate Provider Custom Incoming MTA",
+              "description": "Review provider-supplied agreement for IP ownership, publication rights, and permitted use clauses. Negotiate terms with provider and route for legal review if needed before UW authorized signature.",
+              "assigneeKind": "office",
+              "assignee": "CoMotion MTA Contracts Officer",
+              "materials": [
+                {
+                  "id": "mat-0.3928513917366403",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                },
+                {
+                  "id": "mat-0.45955315277897324",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                }
+              ]
+            },
+            "posX": 680,
+            "posY": 330,
+            "isDeletable": true,
+            "answers": []
+          },
+          {
+            "id": "node_e16d8bd7",
+            "type": "ACTION",
+            "label": "Execute Outgoing MTA Using UW Standard or UBMTA Terms",
+            "content": {
+              "title": "Execute Outgoing MTA Using UW Standard or UBMTA Terms",
+              "description": "Prepare the outgoing MTA using UW standard outgoing template or UBMTA Letter of Implementation. Confirm material description, recipient PI, and permitted use. Obtain PI approval and UW authorized signature.",
+              "assigneeKind": "office",
+              "assignee": "CoMotion MTA Specialist",
+              "materials": [
+                {
+                  "id": "mat-0.6705505911488523",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                },
+                {
+                  "id": "mat-0.6730676262124561",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                },
+                {
+                  "id": "mat-0.17296759208192602",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                }
+              ]
+            },
+            "posX": 680,
+            "posY": 580,
+            "isDeletable": true,
+            "answers": []
+          },
+          {
+            "id": "node_1596b39a",
+            "type": "ACTION",
+            "label": "Review and Negotiate Recipient Custom Outgoing MTA Terms",
+            "content": {
+              "title": "Review and Negotiate Recipient Custom Outgoing MTA Terms",
+              "description": "Evaluate recipient-proposed custom terms for IP, publication, and sublicensing provisions. Negotiate to protect UW interests, involve CoMotion legal counsel as needed, and route for authorized UW signature.",
+              "assigneeKind": "office",
+              "assignee": "CoMotion MTA Contracts Officer",
+              "materials": [
+                {
+                  "id": "mat-0.14224336508844682",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                },
+                {
+                  "id": "mat-0.7663291637011213",
+                  "label": "Material",
+                  "attachKind": null,
+                  "attachValue": ""
+                }
+              ]
+            },
+            "posX": 680,
+            "posY": 830,
+            "isDeletable": true,
+            "answers": []
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_49a9e9bd",
+            "sourceNodeId": "node_2846c15b",
+            "sourceAnswerId": "ans_f343f166",
+            "targetNodeId": "node_3735e03b",
+            "isDeletable": false
+          },
+          {
+            "id": "edge_ef6a90b2",
+            "sourceNodeId": "node_3735e03b",
+            "sourceAnswerId": "ans_54400bb8",
+            "targetNodeId": "node_a90ec237",
+            "isDeletable": true
+          },
+          {
+            "id": "edge_7a5b9d55",
+            "sourceNodeId": "node_3735e03b",
+            "sourceAnswerId": "ans_393b3bb6",
+            "targetNodeId": "node_131e182d",
+            "isDeletable": true
+          },
+          {
+            "id": "edge_797a7d59",
+            "sourceNodeId": "node_a90ec237",
+            "sourceAnswerId": "ans_1a6f83f3",
+            "targetNodeId": "node_24dc9d50",
+            "isDeletable": true
+          },
+          {
+            "id": "edge_9e3ec9cc",
+            "sourceNodeId": "node_a90ec237",
+            "sourceAnswerId": "ans_65c266b1",
+            "targetNodeId": "node_c5488f5a",
+            "isDeletable": true
+          },
+          {
+            "id": "edge_dd72a98d",
+            "sourceNodeId": "node_131e182d",
+            "sourceAnswerId": "ans_10bf4d98",
+            "targetNodeId": "node_e16d8bd7",
+            "isDeletable": true
+          },
+          {
+            "id": "edge_909e4b73",
+            "sourceNodeId": "node_131e182d",
+            "sourceAnswerId": "ans_9035a3c6",
+            "targetNodeId": "node_1596b39a",
+            "isDeletable": true
+          }
+        ]
+      },
+      "publishedAt": "2026-05-12T07:33:11.175Z"
+    },
+    {
+      "id": "snapshot_757263f2",
       "flowId": "flow_f4ea50f8",
-      "version": 4,
+      "version": 6,
       "publishScope": "PUBLIC",
       "snapshotJson": {
         "flow": {
           "id": "flow_f4ea50f8",
           "name": "UW_CoMotion_MTA_Triage_Rationale",
           "description": "Triage workflow for UW CoMotion Material Transfer Agreements (MTAs), guiding staff through the classification and routing of incoming and outgoing MTA requests.",
-          "version": 4
+          "version": 6
         },
         "nodes": [
           {
@@ -1529,8 +2113,8 @@
             "content": {
               "question": "Is the UW sending materials to an external party (Outgoing) or receiving materials from an external party (Incoming)?"
             },
-            "posX": 20,
-            "posY": 80,
+            "posX": -145.39453125,
+            "posY": 153.7109375,
             "isDeletable": true,
             "answers": [
               {
@@ -1575,8 +2159,8 @@
             "content": {
               "question": "Is the biological material eligible for transfer under the Uniform Biological Material Transfer Agreement (UBMTA), and is the receiving institution a UBMTA signatory?"
             },
-            "posX": 680,
-            "posY": 80,
+            "posX": 834.2578125,
+            "posY": 29.13671875,
             "isDeletable": true,
             "answers": [
               {
@@ -1661,8 +2245,8 @@
                 }
               ]
             },
-            "posX": 1010,
-            "posY": 80,
+            "posX": 1292.0546875,
+            "posY": -62.09765625,
             "isDeletable": true,
             "answers": []
           },
@@ -1684,8 +2268,8 @@
                 }
               ]
             },
-            "posX": 1010,
-            "posY": 330,
+            "posX": 1195.88671875,
+            "posY": 290.515625,
             "isDeletable": true,
             "answers": []
           },
@@ -1874,7 +2458,7 @@
           }
         ]
       },
-      "publishedAt": "2026-05-07T02:43:17.315Z"
+      "publishedAt": "2026-05-10T03:51:06.451Z"
     },
     {
       "id": "snapshot_bce6edb4",
