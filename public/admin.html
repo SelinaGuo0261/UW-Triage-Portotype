@@ -738,27 +738,8 @@ const colorFor = (s) => {
 };
 
 // ── Canvas ───────────────────────────────────────────────────
-const SEED_NODES = [
-  { id: 'n0', type: 'definition', x: -310, y: 80, title: 'MTA', body: "An MTA is a contract that defines the terms under which physical research materials are shared between organizations. It addresses ownership, allowable use, publication rights, and any obligations to return or destroy unused material. UW CoMotion’s licensing office negotiates and signs all incoming and outgoing MTAs." },
-  { id: 'n2', type: 'decision', x: 80,  y: 80,  title: 'What document type?', answers: [{ id: 'a1', label: 'MTA' }, { id: 'a2', label: 'NDA' }, { id: 'a3', label: 'Data Use Agreement' }, { id: 'a4', label: 'Other / Unknown' }] },
-  { id: 'n3', type: 'decision', x: 380, y: 80,  title: 'Does it involve human subjects?', answers: [{ id: 'b1', label: 'Yes' }, { id: 'b2', label: 'No' }] },
-  { id: 'n4', type: 'action',   x: 680, y: 80,  title: 'Route to IRB Review', description: 'Assign to IRB coordinator with SLA of 5 business days.', assignee: 'IRB Office', materials: [
-    { id: 'mat-n4-1', label: 'IRB Protocol Template', attachKind: 'pdf', attachValue: 'IRB_Protocol_Template.pdf' },
-    { id: 'mat-n4-2', label: 'Human Subjects Guide', attachKind: 'url', attachValue: 'https://www.washington.edu/research/hsd/' },
-  ]},
-  { id: 'n5', type: 'action',   x: 680, y: 390, title: 'Standard Legal Review', description: 'Queue for OSP legal team.', assignee: 'OSP Legal', materials: [] },
-  { id: 'n6', type: 'action',   x: 380, y: 258, title: 'Triage for Manual Review', description: 'Flag for admin classification.', assignee: 'Dept. Admin', materials: [] },
-  { id: 'n7', type: 'people',   x: 80,  y: 576, name: 'Sarah Chen', role: 'IRB Coordinator', email: 's.chen@uw.edu', hiddenFromResearchers: true },
-  { id: 'n8', type: 'people',   x: 380, y: 576, name: 'Mark Davis', role: 'OSP Legal', email: 'm.davis@uw.edu', hiddenFromResearchers: true },
-  { id: 'n9', type: 'people',   x: 680, y: 640, name: 'Anna Kim', role: 'Dept. Admin', email: 'a.kim@uw.edu', hiddenFromResearchers: false },
-];
-const SEED_EDGES = [
-  { id: 'e0', from: 'n0', fromPort: 'out', to: 'n2', toPort: 'in' },
-  { id: 'e2', from: 'n2', fromPort: 'a1', to: 'n3', toPort: 'in' },
-  { id: 'e3', from: 'n3', fromPort: 'b1', to: 'n4', toPort: 'in' },
-  { id: 'e4', from: 'n3', fromPort: 'b2', to: 'n5', toPort: 'in' },
-  { id: 'e5', from: 'n2', fromPort: 'a4', to: 'n6', toPort: 'in' },
-];
+const SEED_NODES = [];
+const SEED_EDGES = [];
 
 const NODE_W = 240;
 const API_BASE = '/api';
@@ -2351,26 +2332,7 @@ function PublishModal({ open, onClose, issues, onPublish }) {
 
 // ── Flowchart Library ─────────────────────────────────────────
 
-const FLOW_CARDS = [
-  {
-    id: 'mta', name: 'MTA Triage Flow',
-    creator: 'Amelia Park', creatorInitials: 'AP',
-    modified: '2 hours ago', created: 'Apr 14, 2025', status: 'draft',
-    nodes: SEED_NODES, edges: SEED_EDGES,
-  },
-  {
-    id: 'nda', name: 'NDA Workflow',
-    creator: 'Dr. Jordan Liu', creatorInitials: 'JL',
-    modified: 'Yesterday', created: 'Apr 10, 2025', status: 'draft',
-    nodes: null, edges: null,
-  },
-  {
-    id: 'dua', name: 'Data Use Agreements',
-    creator: 'Sam Rivera', creatorInitials: 'SR',
-    modified: '3 days ago', created: 'Apr 7, 2025', status: 'draft',
-    nodes: null, edges: null,
-  },
-];
+const FLOW_CARDS = [];
 
 function MiniFlowPreview({ nodes, edges, small = false }) {
   if (!nodes || !nodes.length) {
@@ -2858,21 +2820,17 @@ function TrashPage({ flows = [] }) {
 
 // ── App ──────────────────────────────────────────────────────
 function App() {
-  const [flowTitle, setFlowTitle] = useState('MTA Triage Flow');
+  const [flowTitle, setFlowTitle] = useState('');
   const [selection, setSelection] = useState(null);
   const [issuesData, setIssuesData] = useState({ issues: [], suggestions: [] });
   const [adders, setAdders] = useState({});
   const [inviteOpen, setInviteOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
-  const [collaborators, setCollaborators] = useState([
-    { id: 'c1', name: 'You (Amelia Park)', email: 'apark@university.edu', initials: 'AP', role: 'Owner' },
-    { id: 'c2', name: 'Dr. Jordan Liu', email: 'jliu@university.edu', initials: 'JL', role: 'Editor' },
-    { id: 'c3', name: 'Sam Rivera', email: 'srivera@university.edu', initials: 'SR', role: 'Reviewer' },
-  ]);
+  const [collaborators, setCollaborators] = useState([]);
   const [activeNav, setActiveNav] = useState('builder');
   const [page, setPage] = useState('library'); // 'library' | 'canvas'
-  const [saveStatus, setSaveStatus] = useState('Saved · 2s ago');
+  const [saveStatus, setSaveStatus] = useState('');
   const [allNodes, setAllNodes] = useState([]);
   const [flowDescription, setFlowDescription] = useState('');
   const [activeBackendFlow, setActiveBackendFlow] = useState(null);
@@ -3133,7 +3091,7 @@ function App() {
           <div className="top-search"><Icon.Search /><span>Search flows, documents…</span><kbd>⌘K</kbd></div>
           <button className="icon-btn" title="Notifications"><Icon.Bell /></button>
           <button className="icon-btn" title="Help"><Icon.Help /></button>
-          <div className="avatar" title="Amelia Park">AP</div>
+          <div className="avatar" title="Admin"></div>
         </div>
       </header>
 
@@ -3152,10 +3110,10 @@ function App() {
         <div className="nav-flows-group">
           <div className="nav-section-label">My Flows</div>
           <div className="nav-flows-list">
-            {[{ label: 'MTA Triage Flow', status: 'draft' }, { label: 'NDA Workflow', status: 'draft' }, { label: 'Data Use Agreements', status: 'draft' }].map((f, i) => (
-              <div key={i} className="nav-item nav-flow-item" data-tooltip={f.label} title={sidebarCollapsed ? f.label : ''}>
-                <span className="nav-flow-dot" style={{ background: f.status === 'live' ? 'var(--accent-green)' : 'var(--ink-400)' }} />
-                <span className="nav-label" style={{ color: 'var(--ink-700)' }}>{f.label}</span>
+            {generatedFlowCards.map((f, i) => (
+              <div key={f.id || i} className="nav-item nav-flow-item" data-tooltip={f.name} title={sidebarCollapsed ? f.name : ''}>
+                <span className="nav-flow-dot" style={{ background: f.status === 'PUBLISHED' ? 'var(--accent-green)' : 'var(--ink-400)' }} />
+                <span className="nav-label" style={{ color: 'var(--ink-700)' }}>{f.name}</span>
               </div>
             ))}
           </div>
@@ -3183,7 +3141,7 @@ function App() {
         {/* ── Library page ── */}
         {activeNav === 'builder' && page === 'library' && (
           <FlowLibrary
-            flows={[...generatedFlowCards, ...FLOW_CARDS]}
+            flows={generatedFlowCards}
             onOpen={(f) => {
               if (f.backendFlow) {
                 setActiveBackendFlow(f.backendFlow);

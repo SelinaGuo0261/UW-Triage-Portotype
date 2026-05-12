@@ -497,583 +497,7 @@ function Avatar({ name, size = 38 }) {
 // documents.jsx — document type definitions
 // ─────────────────────────────────────────────
 
-const DOC_TYPES = [
-  {
-    id: "mta",
-    name: "Material Transfer Agreement",
-    abbrev: "MTA",
-    summary: "Governs the transfer of tangible research materials — biological samples, cell lines, compounds, prototypes — between UW and another institution.",
-    definition: "An MTA is a contract that defines the terms under which physical research materials are shared between organizations. It addresses ownership, allowable use, publication rights, and any obligations to return or destroy unused material. UW CoMotion's licensing office negotiates and signs all incoming and outgoing MTAs.",
-    offices: ["comotion_lic", "ogc"],
-    primaryOffice: "comotion_lic",
-    templates: [
-      { name: "UW Outgoing MTA — Standard Template", format: "PDF", size: "184 KB" },
-      { name: "UBMTA (Uniform Biological MTA) Cover Letter", format: "DOCX", size: "42 KB" },
-      { name: "MTA Information Intake Form", format: "PDF", size: "96 KB" },
-    ],
-    flow: {
-      questions: [
-        {
-          id: "direction",
-          title: "Are materials coming in or going out?",
-          help: "Pick the direction relative to UW.",
-          options: [
-            { value: "incoming", label: "Coming in to UW", sub: "From another institution to a UW researcher" },
-            { value: "outgoing", label: "Going out from UW", sub: "From a UW researcher to another institution" },
-            { value: "both", label: "Both directions", sub: "Bidirectional exchange" },
-            { value: "unsure", label: "I'm not sure", sub: "I'd like guidance" },
-          ],
-        },
-        {
-          id: "material_type",
-          title: "What kind of material is being transferred?",
-          options: [
-            { value: "bio_human", label: "Human-derived biological material", sub: "Tissue, blood, cell lines, derivatives" },
-            { value: "bio_other", label: "Non-human biological material", sub: "Animal tissue, plants, microorganisms" },
-            { value: "chem", label: "Chemical compound or reagent" },
-            { value: "device", label: "Device, prototype, or hardware" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "partner",
-          title: "Who is the other party?",
-          options: [
-            { value: "academic", label: "Another academic or non-profit institution" },
-            { value: "industry", label: "An industry / for-profit partner" },
-            { value: "intl", label: "An international institution" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "phi",
-          title: "Does the material include identifiable patient information?",
-          help: "PHI under HIPAA, or coded data linkable to identities.",
-          options: [
-            { value: "yes", label: "Yes — includes PHI or identifiable codes" },
-            { value: "no", label: "No — fully de-identified" },
-            { value: "na", label: "Not applicable" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-      ],
-      compute(a) {
-        const steps = [];
-        steps.push({
-          office: "CoMotion Licensing",
-          contact: "comotion_lic",
-          action: "Submit MTA Information Intake Form",
-          materials: [
-            "Completed MTA Intake Form (PDF)",
-            "Description of material(s) and quantities",
-            "Provider/recipient contact and institution",
-            "PI name + UW department",
-          ],
-          situation: a.direction === "unsure"
-            ? { label: "Direction", branchOf: "direction", options: [
-                { value: "incoming", label: "Incoming" },
-                { value: "outgoing", label: "Outgoing" },
-              ]}
-            : null,
-        });
-        if (a.material_type === "bio_human" || a.phi === "yes") {
-          steps.push({
-            office: "UW Medicine Privacy Review",
-            contact: "privacy",
-            action: "Privacy & PHI clearance",
-            materials: [
-              "Source of human material",
-              "De-identification status",
-              "IRB protocol number (if applicable)",
-            ],
-          });
-          steps.push({
-            office: "Human Subjects Division",
-            contact: "irb",
-            action: "Confirm IRB coverage",
-            materials: ["Approved IRB protocol or exempt determination"],
-          });
-        }
-        if (a.partner === "industry") {
-          steps.push({
-            office: "Office of the General Counsel",
-            contact: "ogc",
-            action: "Industry terms review",
-            materials: ["Counterparty's draft MTA", "Any side letters", "Existing relationship docs"],
-            situation: { label: "Are publication terms restricted?", branchOf: "publication", options: [
-              { value: "open", label: "Open publication" },
-              { value: "delay", label: "Publication delay requested" },
-              { value: "review", label: "Sponsor pre-review required" },
-            ]},
-          });
-        } else if (a.partner === "intl") {
-          steps.push({
-            office: "Office of Global Affairs",
-            contact: "global",
-            action: "Export control screening",
-            materials: ["Destination country", "End-use statement", "Recipient institution detail"],
-          });
-        }
-        steps.push({
-          office: "CoMotion Licensing",
-          contact: "comotion_lic",
-          action: "Final negotiation and signature",
-          materials: [
-            "Final MTA draft (Word, with track changes if applicable)",
-            "PI sign-off email",
-            "Routing form approvals from prior steps",
-          ],
-        });
-        return steps;
-      },
-    },
-  },
-  {
-    id: "nda",
-    name: "Non-Disclosure Agreement",
-    abbrev: "NDA",
-    summary: "Protects confidential information shared between UW and an external party before, during, or after a research engagement.",
-    definition: "An NDA (also called a Confidentiality Agreement) governs the exchange of proprietary information for a defined purpose. UW most commonly uses NDAs at the exploratory stage of an industry collaboration, before any formal sponsored research agreement is in place.",
-    offices: ["comotion_legal", "ogc"],
-    primaryOffice: "comotion_legal",
-    templates: [
-      { name: "UW Mutual NDA Template", format: "DOCX", size: "58 KB" },
-      { name: "UW One-way NDA — Inbound", format: "DOCX", size: "52 KB" },
-    ],
-    flow: {
-      questions: [
-        {
-          id: "purpose",
-          title: "What's the purpose of the disclosure?",
-          options: [
-            { value: "explore", label: "Explore a potential collaboration", sub: "Before any sponsored agreement" },
-            { value: "diligence", label: "Industry diligence on UW IP", sub: "Reviewing tech for licensing" },
-            { value: "consult", label: "Faculty consulting discussion" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "direction",
-          title: "Who is disclosing confidential information?",
-          options: [
-            { value: "uw_only", label: "UW disclosing to the other party" },
-            { value: "them_only", label: "Other party disclosing to UW" },
-            { value: "mutual", label: "Mutual disclosure" },
-          ],
-        },
-        {
-          id: "term",
-          title: "How long should confidentiality last?",
-          options: [
-            { value: "3y", label: "3 years (UW standard)" },
-            { value: "5y", label: "5 years" },
-            { value: "longer", label: "Longer or perpetual", sub: "Will require additional review" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-      ],
-      compute(a) {
-        const steps = [];
-        steps.push({
-          office: "CoMotion Legal",
-          contact: "comotion_legal",
-          action: "Initial NDA request and template selection",
-          materials: [
-            "Counterparty name + contact",
-            "Brief description of subject matter",
-            "Anticipated start date",
-          ],
-        });
-        if (a.purpose === "diligence") {
-          steps.push({
-            office: "CoMotion Licensing",
-            contact: "comotion_lic",
-            action: "Confirm licensable IP scope",
-            materials: ["Disclosure or invention record", "Licensing officer of record"],
-          });
-        }
-        if (a.term === "longer") {
-          steps.push({
-            office: "Office of the General Counsel",
-            contact: "ogc",
-            action: "Extended-term review",
-            materials: ["Justification for extended term", "Counterparty's draft language"],
-          });
-        }
-        steps.push({
-          office: "CoMotion Legal",
-          contact: "comotion_legal",
-          action: "Negotiate and route for signature",
-          materials: ["Final NDA draft", "Authorized signer designation"],
-          situation: { label: "Counterparty redlines?", branchOf: "redlines", options: [
-            { value: "none", label: "Accept UW template as-is" },
-            { value: "minor", label: "Minor edits" },
-            { value: "major", label: "Substantial redlines" },
-          ]},
-        });
-        return steps;
-      },
-    },
-  },
-  {
-    id: "sra",
-    name: "Sponsored Research Agreement",
-    abbrev: "SRA",
-    summary: "Governs externally funded research conducted at UW, defining scope, deliverables, IP, and payment terms.",
-    definition: "An SRA is the principal contract for externally funded research. The Office of Sponsored Programs (OSP) is the authorized signatory for all SRAs at UW; PIs cannot sign on behalf of the university. SRAs may originate from federal, state, foundation, or industry sponsors.",
-    offices: ["osp_intake", "osp_industry", "ogc"],
-    primaryOffice: "osp_intake",
-    templates: [
-      { name: "OSP eGC1 Routing Form", format: "Online", size: "Web form" },
-      { name: "Industry SRA Template", format: "DOCX", size: "112 KB" },
-      { name: "Subaward Risk Questionnaire", format: "PDF", size: "78 KB" },
-    ],
-    flow: {
-      questions: [
-        {
-          id: "sponsor",
-          title: "Who is the sponsor?",
-          options: [
-            { value: "federal", label: "Federal agency", sub: "NIH, NSF, DOE, DoD, etc." },
-            { value: "foundation", label: "Foundation or non-profit" },
-            { value: "industry", label: "Industry / for-profit" },
-            { value: "intl", label: "International sponsor" },
-          ],
-        },
-        {
-          id: "stage",
-          title: "What stage is the proposal at?",
-          options: [
-            { value: "pre", label: "Pre-proposal — exploring", sub: "No solicitation yet" },
-            { value: "draft", label: "Drafting the proposal" },
-            { value: "ready", label: "Ready to submit" },
-            { value: "awarded", label: "Awarded — negotiating terms" },
-          ],
-        },
-        {
-          id: "subaward",
-          title: "Are there subawards to other institutions?",
-          options: [
-            { value: "no", label: "No subawards" },
-            { value: "one_two", label: "One or two subawards" },
-            { value: "many", label: "Three or more subawards" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "humans",
-          title: "Does the research involve human subjects?",
-          options: [
-            { value: "yes", label: "Yes" },
-            { value: "no", label: "No" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-      ],
-      compute(a) {
-        const steps = [];
-        steps.push({
-          office: "OSP Pre-Award Intake",
-          contact: "osp_intake",
-          action: "Initiate eGC1 routing",
-          materials: [
-            "Project title and abstract",
-            "Sponsor solicitation or RFP (if any)",
-            "Budget and budget justification (draft acceptable)",
-            "PI and co-I list with effort percentages",
-          ],
-          situation: a.stage === "pre"
-            ? { label: "Pre-proposal type", branchOf: "preproposal", options: [
-                { value: "loi", label: "Letter of intent" },
-                { value: "concept", label: "Concept paper" },
-                { value: "white", label: "White paper" },
-              ]}
-            : null,
-        });
-        if (a.sponsor === "industry") {
-          steps.push({
-            office: "OSP Industry Contracts",
-            contact: "osp_industry",
-            action: "Industry term sheet review",
-            materials: [
-              "Sponsor's draft agreement",
-              "Statement of work",
-              "IP and publication expectations",
-            ],
-          });
-        }
-        if (a.humans === "yes" || a.humans === "unsure") {
-          steps.push({
-            office: "Human Subjects Division",
-            contact: "irb",
-            action: "IRB protocol submission",
-            materials: ["Draft protocol", "Recruitment materials", "Consent form drafts"],
-          });
-        }
-        if (a.subaward === "one_two" || a.subaward === "many") {
-          steps.push({
-            office: "OSP Pre-Award Intake",
-            contact: "osp_intake",
-            action: "Subaward risk assessment",
-            materials: [
-              "Subrecipient FDP profile or risk questionnaire",
-              "Scope of work for each sub",
-              "Sub-budget and justification",
-            ],
-            situation: { label: "Subrecipient is", branchOf: "sub_type", options: [
-              { value: "fdp", label: "FDP member institution" },
-              { value: "other_us", label: "Other US institution" },
-              { value: "intl_sub", label: "International institution" },
-            ]},
-          });
-        }
-        if (a.sponsor === "intl") {
-          steps.push({
-            office: "Office of Global Affairs",
-            contact: "global",
-            action: "Export control & foreign sponsor screening",
-            materials: ["Sponsor entity details", "End-use country", "Restricted-party screen results"],
-          });
-        }
-        steps.push({
-          office: "OSP Pre-Award Intake",
-          contact: "osp_intake",
-          action: "Final review and submission to sponsor",
-          materials: ["Final eGC1 with all approvals", "Sponsor-formatted proposal package"],
-        });
-        return steps;
-      },
-    },
-  },
-  {
-    id: "dua",
-    name: "Data Use Agreement",
-    abbrev: "DUA",
-    summary: "Governs the transfer of research data — particularly data that includes identifiable, sensitive, or restricted information — between UW and an external institution.",
-    definition: "A DUA defines who may use the data, for what purpose, with what protections, and for how long. UW typically routes DUAs through OSP, with PHI-specific reviews handled by UW Medicine Compliance.",
-    offices: ["osp_industry", "privacy", "ogc"],
-    primaryOffice: "osp_industry",
-    templates: [
-      { name: "UW Outgoing DUA Template", format: "DOCX", size: "64 KB" },
-      { name: "Limited Data Set DUA — HIPAA", format: "DOCX", size: "72 KB" },
-    ],
-    flow: {
-      questions: [
-        {
-          id: "direction",
-          title: "Are you sending or receiving data?",
-          options: [
-            { value: "incoming", label: "Receiving from another institution" },
-            { value: "outgoing", label: "Sending UW data out" },
-            { value: "both", label: "Both" },
-          ],
-        },
-        {
-          id: "phi",
-          title: "Does the data include PHI?",
-          options: [
-            { value: "yes", label: "Yes — includes PHI or HIPAA-covered identifiers" },
-            { value: "lds", label: "Limited Data Set", sub: "Dates, geocodes, but no direct identifiers" },
-            { value: "no", label: "No — fully de-identified or non-health" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "partner",
-          title: "Who is the other party?",
-          options: [
-            { value: "academic", label: "Academic / non-profit" },
-            { value: "industry", label: "Industry / for-profit" },
-            { value: "intl", label: "International institution" },
-          ],
-        },
-      ],
-      compute(a) {
-        const steps = [];
-        steps.push({
-          office: "OSP Contracts",
-          contact: "osp_industry",
-          action: "Submit DUA intake",
-          materials: ["Data description", "Counterparty institution", "PI and study reference"],
-        });
-        if (a.phi === "yes" || a.phi === "lds" || a.phi === "unsure") {
-          steps.push({
-            office: "UW Medicine Privacy",
-            contact: "privacy",
-            action: "PHI compliance review",
-            materials: ["Data dictionary", "De-identification methodology", "IRB approval if applicable"],
-            situation: { label: "Identifiability level", branchOf: "id_level", options: [
-              { value: "phi_full", label: "Full PHI" },
-              { value: "lds", label: "Limited Data Set" },
-              { value: "deid", label: "De-identified per Safe Harbor" },
-            ]},
-          });
-        }
-        if (a.partner === "intl") {
-          steps.push({
-            office: "Office of Global Affairs",
-            contact: "global",
-            action: "Cross-border data transfer review",
-            materials: ["Destination country", "Data residency obligations", "Local law compliance memo"],
-          });
-        }
-        steps.push({
-          office: "OSP Contracts",
-          contact: "osp_industry",
-          action: "Negotiate and execute DUA",
-          materials: ["Final DUA draft", "All prior approvals attached"],
-        });
-        return steps;
-      },
-    },
-  },
-  {
-    id: "cda",
-    name: "Confidential Disclosure Agreement",
-    abbrev: "CDA",
-    summary: "A two-way NDA used specifically when both UW and an industry partner expect to exchange confidential technical information.",
-    definition: "A CDA is functionally similar to a mutual NDA but is the term commonly used in industry-academic exchanges and CoMotion-led licensing discussions. It defines what counts as confidential, how long protection lasts, and what may be done with the information.",
-    offices: ["comotion_legal"],
-    primaryOffice: "comotion_legal",
-    templates: [
-      { name: "UW CDA Template — CoMotion", format: "DOCX", size: "60 KB" },
-    ],
-    flow: {
-      questions: [
-        {
-          id: "context",
-          title: "What's the context for the CDA?",
-          options: [
-            { value: "license", label: "Licensing discussion on UW IP" },
-            { value: "research", label: "Pre-research scoping with industry" },
-            { value: "consult", label: "Faculty consulting" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "redlines",
-          title: "Has the counterparty proposed their own draft?",
-          options: [
-            { value: "their_draft", label: "Yes — they sent their template" },
-            { value: "uw_draft", label: "No — we'll send the UW template" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-      ],
-      compute(a) {
-        const steps = [];
-        steps.push({
-          office: "CoMotion Legal",
-          contact: "comotion_legal",
-          action: "Submit CDA request",
-          materials: ["Counterparty contact", "Subject matter summary", "Authorized signer at UW"],
-        });
-        if (a.redlines === "their_draft") {
-          steps.push({
-            office: "CoMotion Legal",
-            contact: "comotion_legal",
-            action: "Redline review of counterparty template",
-            materials: ["Counterparty's draft", "UW standard terms checklist"],
-            situation: { label: "Redline complexity", branchOf: "redlines", options: [
-              { value: "minor", label: "Minor — terms only" },
-              { value: "structural", label: "Structural rewrite needed" },
-            ]},
-          });
-        }
-        steps.push({
-          office: "CoMotion Legal",
-          contact: "comotion_legal",
-          action: "Route for signature",
-          materials: ["Final CDA", "Signer designation"],
-        });
-        return steps;
-      },
-    },
-  },
-  {
-    id: "irb",
-    name: "IRB Protocol",
-    abbrev: "IRB",
-    summary: "Required review for any UW research involving human subjects or their identifiable data.",
-    definition: "All human subjects research at UW must be reviewed by the Human Subjects Division (HSD) before any participant interaction or data collection begins. The level of review — exempt, expedited, or full board — depends on the risk level and research category.",
-    offices: ["irb", "privacy"],
-    primaryOffice: "irb",
-    templates: [
-      { name: "Zipline IRB Submission Portal", format: "Online", size: "Web portal" },
-      { name: "Consent Form Template — Adult", format: "DOCX", size: "48 KB" },
-      { name: "Exempt Determination Request", format: "PDF", size: "32 KB" },
-    ],
-    flow: {
-      questions: [
-        {
-          id: "interaction",
-          title: "Does your research involve interaction with people?",
-          options: [
-            { value: "yes_intervene", label: "Yes — interventions or interactions" },
-            { value: "data_only", label: "No — only their identifiable data" },
-            { value: "no", label: "No — fully de-identified or non-human" },
-          ],
-        },
-        {
-          id: "risk",
-          title: "What's the risk level for participants?",
-          options: [
-            { value: "minimal", label: "Minimal risk", sub: "No greater than everyday life" },
-            { value: "greater", label: "Greater than minimal" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-        {
-          id: "vulnerable",
-          title: "Are vulnerable populations involved?",
-          options: [
-            { value: "yes", label: "Yes", sub: "Children, prisoners, pregnant individuals, etc." },
-            { value: "no", label: "No" },
-            { value: "unsure", label: "I'm not sure" },
-          ],
-        },
-      ],
-      compute(a) {
-        const steps = [];
-        if (a.interaction === "no") {
-          steps.push({
-            office: "Human Subjects Division",
-            contact: "irb",
-            action: "Confirm research is not human subjects",
-            materials: ["Project description", "Data sources and identifiability"],
-          });
-          return steps;
-        }
-        steps.push({
-          office: "Human Subjects Division",
-          contact: "irb",
-          action: "Determine review category",
-          materials: ["Brief protocol summary", "Risk assessment", "Population description"],
-          situation: { label: "Category", branchOf: "category", options: [
-            { value: "exempt", label: "Exempt" },
-            { value: "expedited", label: "Expedited" },
-            { value: "full", label: "Full board" },
-          ]},
-        });
-        steps.push({
-          office: "Human Subjects Division",
-          contact: "irb",
-          action: "Submit protocol via Zipline",
-          materials: ["Full protocol document", "Consent forms", "Recruitment materials", "Data security plan"],
-        });
-        if (a.vulnerable === "yes" || a.risk === "greater") {
-          steps.push({
-            office: "Human Subjects Division",
-            contact: "irb",
-            action: "Convened board review",
-            materials: ["Subpart B/C/D-specific protections memo", "PI in-person availability for review"],
-          });
-        }
-        return steps;
-      },
-    },
-  },
-];
+const DOC_TYPES = [];
 
 const DOC_BY_ID = Object.fromEntries(DOC_TYPES.map((d) => [d.id, d]));
 const API_BASE = "/api";
@@ -1443,7 +867,7 @@ function StepResults({ steps, situationOverrides, onSituationChange, onContact }
 // customize.jsx — customization panel
 // ─────────────────────────────────────────────
 
-function CustomizePanel({ doc, answers }) {
+function CustomizePanel({ questions, answers }) {
   return (
     <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
       <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid var(--ink-200)" }}>
@@ -1456,8 +880,8 @@ function CustomizePanel({ doc, answers }) {
       </div>
 
       <div style={{ padding: "6px 0" }}>
-        {doc.flow.questions.map((q, i) => {
-          const opt = q.options.find((o) => o.value === answers[q.id]);
+        {(questions || []).map((q, i) => {
+          const opt = (q.options || []).find((o) => o.value === answers[q.id]);
           return (
             <div key={q.id} style={{ padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid var(--ink-200)", display: "flex", gap: 16, alignItems: "flex-start" }}>
               <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5, marginTop: 4, flexShrink: 0, width: 26 }}>
@@ -1483,7 +907,7 @@ function CustomizePanel({ doc, answers }) {
 // documents-pages.jsx — index + detail
 // ─────────────────────────────────────────────
 
-function DocumentTypesIndex({ onPick, docs = DOC_TYPES }) {
+function DocumentTypesIndex({ onPick, docs = [] }) {
   const [q, setQ] = useState("");
   const filtered = docs.filter((d) => {
     if (!q) return true;
@@ -1629,7 +1053,7 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
 
                 <div style={{ marginTop: 24 }}>
                   <CustomizePanel
-                    doc={doc}
+                    questions={doc?.flow?.questions || []}
                     answers={answers}
                   />
                 </div>
@@ -1689,20 +1113,39 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
   );
 }
 
-function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
+function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
   const doc = docs.find((d) => d.id === docId) || DOC_BY_ID[docId];
   const [stage, setStage] = useState("questions");
   const [answers, setAnswers] = useState({});
   const [situationOverrides, setSituationOverrides] = useState({});
-  const [graphResultNode, setGraphResultNode] = useState(null);  // ← 新增
+  const [graphResultNode, setGraphResultNode] = useState(null);
+  const [graphPath, setGraphPath] = useState([]);  // [{ node, answerId }]
 
-  // backend flow 走 GraphDocWizard，static DOC_TYPES 走原有 compute
   const isBackendFlow = Boolean(doc?._snapshot);
+
+  // Questions in traversal order for Stage 3
+  const customizeQuestions = useMemo(() => {
+    if (isBackendFlow && graphPath.length > 0) {
+      return graphPath.map(({ node }) => ({
+        id: node.id,
+        title: node.content?.question || node.label,
+        options: (node.answers || []).map((a) => ({ value: a.id, label: a.text })),
+      }));
+    }
+    return doc?.flow?.questions || [];
+  }, [isBackendFlow, graphPath, doc]);
+
+  // Answers keyed by nodeId for Stage 3
+  const customizeAnswers = useMemo(() => {
+    if (isBackendFlow && graphPath.length > 0) {
+      return Object.fromEntries(graphPath.map(({ node, answerId }) => [node.id, answerId]));
+    }
+    return answers;
+  }, [isBackendFlow, graphPath, answers]);
 
   const steps = useMemo(() => {
     if (stage !== "results") return [];
     if (isBackendFlow && graphResultNode) {
-      // 把 ACTION node 转成 StepResults 需要的格式
       return [{
         office: graphResultNode.content?.assignee || "UW CoMotion",
         contact: "comotion_legal",
@@ -1714,8 +1157,8 @@ function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
   }, [stage, answers, situationOverrides, doc, isBackendFlow, graphResultNode]);
 
   function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
-  function handleGraphResult(actionNode) { setGraphResultNode(actionNode); setStage("results"); }  // ← 新增
-  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultNode(null); }
+  function handleGraphResult(actionNode, path) { setGraphResultNode(actionNode); setGraphPath(path || []); setStage("results"); }
+  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultNode(null); setGraphPath([]); }
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--canvas-bg)" }}>
       <div style={{
@@ -1867,8 +1310,8 @@ function DocumentDetail({ docId, onBack, onContact, docs = DOC_TYPES }) {
 
                   <div style={{ marginTop: 24 }}>
                     <CustomizePanel
-                      doc={doc}
-                      answers={answers}
+                      questions={customizeQuestions}
+                      answers={customizeAnswers}
                     />
                   </div>
                 </>
@@ -2107,7 +1550,7 @@ function LeftSidebar({ active, setActive, collapsed, dragging, onResizeStart }) 
 function KnowledgeBase({ mode, setMode }) {
   const [docId, setDocId] = useState(null);
   const [contactKey, setContactKey] = useState(null);
-  const [publicDocs, setPublicDocs] = useState(DOC_TYPES);
+  const [publicDocs, setPublicDocs] = useState([]);
 
   useEffect(() => { setDocId(null); setContactKey(null); }, [mode]);
   useEffect(() => {
@@ -2125,7 +1568,7 @@ function KnowledgeBase({ mode, setMode }) {
         }));
         if (alive) setPublicDocs(snapshots.filter(Boolean).map(snapshotToDoc));
       } catch {
-        if (alive) setPublicDocs(DOC_TYPES);
+        if (alive) setPublicDocs([]);
       }
     }
     loadPublicDocs();
