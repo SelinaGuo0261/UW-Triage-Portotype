@@ -8,7 +8,7 @@
       "publishScope": "PUBLIC",
       "aiStatus": "AI_READY",
       "aiError": null,
-      "version": 2,
+      "version": 3,
       "sourceUrl": null,
       "sourceFile": "UW_CoMotion_MTA_Triage_Rationale.pdf",
       "createdById": "demo-admin",
@@ -76,7 +76,7 @@
           "answers": [
             {
               "id": "ans_1a6f83f3",
-              "text": "Provider uses UBMTA or NIH Simple Letter Agreement",
+              "text": "Provider uses UWMTA or NIH Simple Letter Agreement",
               "order": 0
             },
             {
@@ -99,12 +99,12 @@
           "answers": [
             {
               "id": "ans_10bf4d98",
-              "text": "Recipient accepts UBMTA or UW standard terms",
+              "text": "For profit: Recipient accepts UBMTA or UW standard terms",
               "order": 0
             },
             {
               "id": "ans_9035a3c6",
-              "text": "Recipient requests custom or negotiated terms",
+              "text": "Non-profit: Recipient requests custom or negotiated terms",
               "order": 1
             }
           ]
@@ -290,7 +290,7 @@
         }
       ],
       "createdAt": "2026-05-12T07:32:53.973Z",
-      "updatedAt": "2026-05-12T07:33:11.175Z"
+      "updatedAt": "2026-05-12T21:20:04.701Z"
     },
     {
       "id": "flow_9b35e53f",
@@ -1771,16 +1771,16 @@
   ],
   "publishedSnapshots": [
     {
-      "id": "snapshot_3ba60c68",
+      "id": "snapshot_ad3360a5",
       "flowId": "flow_6f04bd60",
-      "version": 2,
+      "version": 3,
       "publishScope": "PUBLIC",
       "snapshotJson": {
         "flow": {
           "id": "flow_6f04bd60",
           "name": "MTA-test2",
           "description": "Triage workflow for UW CoMotion Material Transfer Agreements (MTAs), guiding staff through agreement type identification and routing.",
-          "version": 2
+          "version": 3
         },
         "nodes": [
           {
@@ -1846,7 +1846,7 @@
             "answers": [
               {
                 "id": "ans_1a6f83f3",
-                "text": "Provider uses UBMTA or NIH Simple Letter Agreement",
+                "text": "Provider uses UWMTA or NIH Simple Letter Agreement",
                 "order": 0
               },
               {
@@ -1869,12 +1869,12 @@
             "answers": [
               {
                 "id": "ans_10bf4d98",
-                "text": "Recipient accepts UBMTA or UW standard terms",
+                "text": "For profit: Recipient accepts UBMTA or UW standard terms",
                 "order": 0
               },
               {
                 "id": "ans_9035a3c6",
-                "text": "Recipient requests custom or negotiated terms",
+                "text": "Non-profit: Recipient requests custom or negotiated terms",
                 "order": 1
               }
             ]
@@ -2060,7 +2060,7 @@
           }
         ]
       },
-      "publishedAt": "2026-05-12T07:33:11.175Z"
+      "publishedAt": "2026-05-12T21:20:04.702Z"
     },
     {
       "id": "snapshot_757263f2",

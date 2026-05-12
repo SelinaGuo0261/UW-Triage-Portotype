@@ -23,8 +23,8 @@ public/
 ├── admin.html               ← HTML shell (~20 lines), loads css + js
 ├── researcher.html          ← HTML shell (~23 lines), loads css + js
 ├── css/
-│   ├── admin.css            ← all admin CSS (524 lines)
-│   └── researcher.css       ← all researcher CSS (222 lines)
+│   ├── admin.css            ← all admin CSS
+│   └── researcher.css       ← all researcher CSS (includes .doc-secnav-panel rules)
 └── js/
     ├── admin/
     │   ├── helpers.js       ← hooks destructure, Icon, AVATAR_COLORS, colorFor,
@@ -42,9 +42,11 @@ public/
         │                      OFFICE_GROUPS, DOC_TYPES, DOC_BY_ID, API_BASE,
         │                      snapshotToDoc
         ├── components.js    ← GraphDocWizard, DocWizard, StepCard, StepResults,
-        │                      CustomizePanel, DocumentTypesIndex,
-        │                      DocumentDetailPreviousDraft, DocumentDetail,
-        │                      ContactRow, ContactDirectory, ContactDetail,
+        │                      CustomizePanel, FlowchartPreview, FlowchartModal,
+        │                      ReadOnlyFlowCanvas, SigningFlowSteps, SigningFlowModal,
+        │                      MyRequestsSigningModal, MyRequestsView,
+        │                      DocumentTypesIndex, DocumentDetail,
+        │                      ContactDirectory, ContactDetail,
         │                      NavIcon, TopBar, LeftSidebar
         └── app.js           ← KnowledgeBase, StubTab, Portal + ReactDOM.createRoot
 ```
@@ -134,6 +136,10 @@ PublishedSnapshot {
   id, flowId, version, publishScope, snapshotJson, publishedAt
 }
 ```
+
+### Important edge data quirk
+
+The edge from a DEFINITION node to the first DECISION node has `sourceAnswerId` set to a non-null answer ID (not null) in some flows. `findAllTerminalPaths` must use `edges.find(e => e.sourceNodeId === definition?.id)` (no `!e.sourceAnswerId` filter) to find the root edge correctly.
 
 ## AI JSON Handling
 
@@ -228,6 +234,7 @@ Backend public data:
 - For each item, loads `GET /api/knowledge-base/:id`.
 - `snapshotToDoc(snapshot)` (in `helpers.js`) adapts published snapshot into doc shape.
 - If API returns no items, publicDocs stays `[]` (no static fallback).
+- `publicDocs` is loaded at `Portal` level (in `app.js`) and passed to both `KnowledgeBase` and `MyRequestsView`.
 
 Researcher visibility:
 
@@ -248,9 +255,143 @@ Knowledge Base card grid:
 - Must always show four equal-size cards per row regardless of sidebar state.
 - Grid: `gridTemplateColumns: "repeat(4, minmax(0, 1fr))"`, cards use `minWidth: 0`.
 
+## Researcher Portal — Redesign (spec: researcher-portal-redesign-spec.md, 2026-05-12)
+
+Implemented all three changes from the spec:
+
+### Change 01 — DocumentDetail: single-column layout
+
+`DocumentDetail` is now a full-width single-column page with a sticky left section nav. Sections in order:
+
+1. Title + abbrev pill
+2. Description
+3. Related Offices
+4. Available Templates
+5. Flowchart Preview
+6. Signing Flow Steps
+7. Processing Time
+8. "Still don't know how to apply?" + CTA
+
+The right-column wizard is removed. A "Find a signing flow →" CTA button at the bottom opens a modal (Change 02).
+
+### Change 02 — SigningFlowModal (KB entry point)
+
+`SigningFlowModal` wraps `GraphDocWizard`/`DocWizard` in a centered modal (maxWidth 560, 88vh). Dimmed backdrop. Esc / backdrop-click closes. Shows result + `CustomizePanel` + "Apply now" / "Close" after flow completes.
+
+### Change 03 — MyRequestsView + MyRequestsSigningModal
+
+`MyRequestsView` replaces the stub tab for "My requests". Has a header with "Find a signing flow →" button. Opens `MyRequestsSigningModal` which shows Q1 as a doc-type selector (A/B/C labels + abbrev + summary) before loading the regular signing flow wizard. "Not sure?" escape hatch links back to KB.
+
+## Researcher Portal — Document Detail Section Nav
+
+### Layout
+
+`DocumentDetail` body uses `position: relative` (not flex-row). A `.doc-secnav-panel` div is `position: absolute; left: 0; top: 0; bottom: 0; width: 200px; padding-left: 40px; display: flex; align-items: center`. The scroll container is `width: 100%; height: 100%; overflowY: auto` filling the full body area. This means the content `maxWidth: 760; margin: 0 auto` stays centered in the full main area — the nav does NOT take layout space.
+
+### Scrolling reliability
+
+- Each section has `id="ksec-{sectionId}"` (e.g. `id="ksec-processing"`).
+- `scrollTo(id)` uses `document.getElementById("ksec-" + id)` — most reliable lookup.
+- Scroll is done via direct `container.scrollTop` assignment (no `scrollTo()` with smooth, which has silent failure at max scroll extent).
+- Active section is tracked via a `scroll` event listener on the container (NOT IntersectionObserver, which fails for bottom sections due to rootMargin constraints).
+- `setActiveSection(id)` is called immediately on click for instant purple highlight.
+
+### CSS
+
+```css
+.doc-secnav-panel {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 200px; padding-left: 40px;
+  display: flex; align-items: center;
+  z-index: 10; pointer-events: none;
+}
+.doc-secnav-panel * { pointer-events: auto; }
+.doc-secnav { width: 160px; }
+@media (max-width: 1100px) { .doc-secnav-panel { display: none; } }
+```
+
+### Components with hideLabel prop
+
+`FlowchartPreview` and `SigningFlowSteps` accept `hideLabel` prop. When `hideLabel={true}`, the internal `Mono` section heading is suppressed so `DocumentDetail` can render subheadings externally with consistent styling.
+
+## Researcher Portal — Flowchart Preview Modal
+
+`FlowchartPreview` shows a compact thumbnail card with a decorative SVG and "View full flowchart →" button. Clicking opens `FlowchartModal` (960px wide, 82vh) with `ReadOnlyFlowCanvas`.
+
+### ReadOnlyFlowCanvas
+
+- Renders backend nodes (UPPERCASE types) at `posX`/`posY` from snapshot
+- SVG bezier edges with `roBezier`, port positions via `roPortPos`
+- DECISION nodes show answers with `1`, `2`, `3`... number badges (matching edge labels)
+- Each edge from a DECISION node shows a number circle at the bezier midpoint `((fp.x+tp.x)/2, (fp.y+tp.y)/2)` matching the answer index
+- Pan via pointer drag, zoom via non-passive wheel listener (`el.addEventListener("wheel", h, { passive: false })`)
+- Auto-fit on mount: computes bounding box of all nodes, sets zoom + pan to fill the modal
+
+### Node heights (backend shapes)
+
+```js
+DEFINITION: 112px
+PEOPLE: 76px
+ACTION: 82 + (assignee ? 20 : 0) + min(materials.length, 4) * 20
+DECISION: 78 + answers.length * 28
+```
+
+## Researcher Portal — Signing Flow Steps
+
+### Tabs
+
+`findAllTerminalPaths(nodes, edges)` does DFS from the root DECISION node, collecting one result per ACTION node reached. Each tab = one terminal path. Tab label is built from path answers (`shortAnswerLabel`): text before first colon, or first 1-2 words per step, joined with " — ".
+
+### Swimlane
+
+Two columns: "UW Researcher (PI)" (purple) + ACTION node's `assignee` (tan/gold). Three derived steps per path:
+1. PI: "Submit request" (with full answer path in description)
+2. Assignee: ACTION node title + description + materials list
+3. PI: "Review & acknowledge"
+
+Transition labels between rows. Legend at bottom. `SigningSwimlane` also fuzzy-matches PEOPLE nodes by name/department to show contact under the office column header.
+
+## Admin Portal — Canvas Changes (2026-05-12)
+
+### Decision node answer numbering
+
+Every answer in a decision node shows a numbered badge (`1`, `2`, `3`…) instead of a bullet dot. The number is rendered as a small mono span (`fontFamily: JetBrains Mono; fontSize: 9; background: purple-100; color: purple-700`). The map uses `(a, i)` to get the index.
+
+Each outgoing branch line (edge) from a decision node also shows the matching number. The SVG edge rendering uses `findIndex` to get the answer's position, and renders a white circle with purple border + mono number at the bezier midpoint `((p1.x+p2.x)/2, (p1.y+p2.y)/2)` — replacing the old variable-width rect label that showed the full answer text.
+
+### Decision node answer line-breaking
+
+Answer inputs changed from `<input>` (single-line) to `<textarea>` (multi-line). Uses `field-sizing: content` CSS (same as the node title input) for CSS-native auto-height with no JavaScript. `resize: none` removes the browser drag handle. `word-wrap: break-word; overflow-wrap: break-word` ensures long words break at the card boundary. Node width stays fixed at `NODE_W = 240px`.
+
+Per-answer row height increased from **28px → 44px** to accommodate wrapped text. Updated in both:
+- `nodeHeight()` in `helpers.js`: `72 + answers.length * 44 + 30`
+- portPos in `helpers.js`: `answerTop + idx * 44 + 22` (center of 44px row)
+
+`.node-answer` CSS: `align-items: center; min-height: 44px` (no `position: relative` since port is no longer inside it).
+
+### Decision node port alignment
+
+**Problem**: port dots used `top: 50%; transform: translateY(-50%)` inside `.node-answer` (CSS-dynamic position), but `portPos()` used a hardcoded `answerTop = 76` formula — two independent calculations that diverged.
+
+**Fix**: ports are moved OUT of `.node-answer` and rendered as direct children of `.node` using explicit pixel `top`:
+
+```js
+// portPos formula (helpers.js):
+const answerTop = 71; // node-head (~37px) + node-title (~34px)
+return { x: node.x + NODE_W, y: node.y + answerTop + idx * 44 + 22 };
+
+// Port element top (components.js NodeView):
+style={{ right: '-7px', top: `${71 + i * 44 + 22}px`, transform: 'translateY(-50%)' }}
+```
+
+Since both the SVG edge endpoint (`portPos`) and the DOM port element use the exact same arithmetic, dots and lines are always co-located regardless of answer content length.
+
+`answerTop` changed from 76 → 71: node-head actual height = 10 (pad-top) + 18 (node-menu explicit height) + 8 (pad-bottom) + 1 (border) = 37px; node-title = 10 + 18 + 6 = 34px; total = 71px.
+
 ## Known Current Issues / Next Likely Work
 
 - Need to test the full Claude path with an actual Anthropic key.
 - Trash has no restore/permanent delete yet.
 - `DocumentDetailPreviousDraft` and `InspectSettings` are dead code — not reachable from UI but still in `components.js`.
 - Backend is a local prototype, not the final Next.js/Prisma implementation from the DOCX.
+- `MyRequestsView` "Apply now" button does not yet create a real request — it is a stub.

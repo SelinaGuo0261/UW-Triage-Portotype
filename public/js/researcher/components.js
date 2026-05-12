@@ -345,6 +345,632 @@ function CustomizePanel({ questions, answers }) {
 // documents-pages.jsx — index + detail
 // ─────────────────────────────────────────────
 
+// ── Read-only flowchart canvas (card-style nodes + bezier edges) ──
+
+const RO_NODE_W = 220;
+
+function roNodeHeight(node) {
+  if (node.type === "DEFINITION") return 112;
+  if (node.type === "PEOPLE") return 76;
+  if (node.type === "ACTION") {
+    const mats = Math.min((node.content?.materials || []).length, 4);
+    return 82 + (node.content?.assignee ? 20 : 0) + mats * 20;
+  }
+  return 78 + (node.answers || []).length * 28; // DECISION
+}
+
+function roPortPos(node, portId) {
+  const h = roNodeHeight(node);
+  const x = node.posX, y = node.posY;
+  if (portId === "in")  return { x, y: y + h / 2 };
+  if (portId === "out") return { x: x + RO_NODE_W, y: y + h / 2 };
+  const idx = (node.answers || []).findIndex((a) => a.id === portId);
+  if (idx >= 0) return { x: x + RO_NODE_W, y: y + 78 + idx * 28 + 14 };
+  return { x: x + RO_NODE_W, y: y + h / 2 };
+}
+
+function roBezier(a, b) {
+  const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
+  return `M ${a.x},${a.y} C ${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
+}
+
+function ReadOnlyFlowNode({ node }) {
+  const label = node.content?.question || node.content?.title || node.label;
+  const BADGE = {
+    DECISION:   { bg: "var(--purple-100)",        color: "var(--purple-800)" },
+    ACTION:     { bg: "oklch(0.94 0.04 155)",     color: "oklch(0.38 0.12 155)" },
+    DEFINITION: { bg: "oklch(0.92 0.05 200)",     color: "oklch(0.32 0.12 200)" },
+    PEOPLE:     { bg: "oklch(0.91 0.06 220)",     color: "oklch(0.34 0.14 220)" },
+  };
+  const badge = BADGE[node.type] || { bg: "var(--ink-100)", color: "var(--ink-700)" };
+  return (
+    <div style={{
+      position: "absolute", left: node.posX, top: node.posY, width: RO_NODE_W,
+      background: "white", borderRadius: 8, border: "1px solid var(--ink-200)",
+      boxShadow: "0 1px 4px rgba(30,20,50,0.08)", userSelect: "none", pointerEvents: "none",
+      ...(node.type === "DEFINITION" ? { borderLeft: "3px solid oklch(0.52 0.12 200)" } : {}),
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px 6px", borderBottom: "1px solid var(--ink-200)" }}>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 500, padding: "2px 5px", borderRadius: 3, letterSpacing: "0.04em", textTransform: "uppercase", background: badge.bg, color: badge.color }}>
+          {node.type.toLowerCase()}
+        </span>
+      </div>
+      <div style={{ padding: "7px 10px 9px" }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-900)", lineHeight: 1.35 }}>{label}</div>
+        {node.type === "DECISION" && (node.answers || []).map((a, i) => (
+          <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "3px 0", fontSize: 11.5, color: "var(--ink-700)" }}>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: "var(--purple-700)", background: "var(--purple-100)", borderRadius: 3, padding: "1px 4px", flexShrink: 0, marginTop: 1, lineHeight: 1.4 }}>{i + 1}</span>
+            <span style={{ lineHeight: 1.4 }}>{a.text}</span>
+          </div>
+        ))}
+        {node.type === "ACTION" && node.content?.assignee && (
+          <div style={{ marginTop: 3, fontSize: 11, color: "var(--ink-500)", fontStyle: "italic" }}>{node.content.assignee}</div>
+        )}
+        {node.type === "ACTION" && (node.content?.materials || []).slice(0, 3).map((m, i) => (
+          <div key={i} style={{ fontSize: 11, color: "var(--ink-600)", marginTop: 2 }}>· {m.label}</div>
+        ))}
+        {node.type === "DEFINITION" && node.content?.description && (
+          <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--ink-700)", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>
+            {node.content.description}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyFlowCanvas({ nodes, edges }) {
+  const containerRef = useRef(null);
+  const [pan, setPan] = useState({ x: 60, y: 60 });
+  const [zoom, setZoom] = useState(1);
+  const dragging = useRef(false);
+  const lastXY = useRef(null);
+  const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+
+  useEffect(() => {
+    if (!containerRef.current || !nodes.length) return;
+    const xs = nodes.map((n) => n.posX), ys = nodes.map((n) => n.posY);
+    const minX = Math.min(...xs), maxX = Math.max(...xs) + RO_NODE_W;
+    const minY = Math.min(...ys), maxY = Math.max(...ys) + 200;
+    const cw = containerRef.current.clientWidth, ch = containerRef.current.clientHeight;
+    const newZoom = Math.min(1, (cw - 80) / (maxX - minX), (ch - 80) / (maxY - minY));
+    setPan({ x: (cw - (maxX - minX) * newZoom) / 2 - minX * newZoom, y: (ch - (maxY - minY) * newZoom) / 2 - minY * newZoom });
+    setZoom(newZoom);
+  }, [nodes]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e) => { e.preventDefault(); setZoom((z) => Math.max(0.25, Math.min(2, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))); };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
+
+  function onPD(e) {
+    if (e.button !== 0) return;
+    dragging.current = true; lastXY.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPM(e) {
+    if (!dragging.current || !lastXY.current) return;
+    const dx = e.clientX - lastXY.current.x, dy = e.clientY - lastXY.current.y;
+    lastXY.current = { x: e.clientX, y: e.clientY };
+    setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+  function onPU() { dragging.current = false; lastXY.current = null; }
+
+  return (
+    <div ref={containerRef} style={{ width: "100%", height: "100%", overflow: "hidden", position: "relative", background: "var(--canvas-bg)", cursor: "grab" }}
+      onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}>
+      <div style={{ position: "absolute", transformOrigin: "0 0", transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}>
+        <svg style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }} width="1" height="1">
+          {edges.map((edge) => {
+            const fn = nodeById[edge.sourceNodeId], tn = nodeById[edge.targetNodeId];
+            if (!fn || !tn) return null;
+            const fp = edge.sourceAnswerId ? roPortPos(fn, edge.sourceAnswerId) : roPortPos(fn, "out");
+            const tp = roPortPos(tn, "in");
+            const d = roBezier(fp, tp);
+            // Answer index for DECISION outgoing edges (bezier midpoint = avg of endpoints for symmetric control points)
+            let ansNum = null;
+            if (edge.sourceAnswerId && fn.type === "DECISION") {
+              const idx = (fn.answers || []).findIndex((a) => a.id === edge.sourceAnswerId);
+              if (idx >= 0) ansNum = idx + 1;
+            }
+            const mx = (fp.x + tp.x) / 2;
+            const my = (fp.y + tp.y) / 2;
+            return (
+              <g key={edge.id}>
+                <path d={d} fill="none" stroke="var(--ink-300)" strokeWidth="1.5" strokeLinecap="round" />
+                {ansNum !== null && (
+                  <g>
+                    <circle cx={mx} cy={my} r={8} fill="white" stroke="var(--purple-600)" strokeWidth="1.2" />
+                    <text x={mx} y={my + 3.5} textAnchor="middle" fontSize="9" fontFamily="'JetBrains Mono', monospace" fill="var(--purple-700)" fontWeight="700">{ansNum}</text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+        {nodes.map((n) => <ReadOnlyFlowNode key={n.id} node={n} />)}
+      </div>
+      <div style={{ position: "absolute", bottom: 10, right: 14, fontSize: 11, color: "var(--ink-400)", pointerEvents: "none", display: "flex", gap: 8 }}>
+        <span>Drag to pan</span><span>·</span><span>Scroll to zoom</span>
+      </div>
+    </div>
+  );
+}
+
+function FlowchartModal({ doc, onClose }) {
+  const graph = doc._snapshot?.snapshotJson || {};
+  const nodes = graph.nodes || [];
+  const edges = graph.edges || [];
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, background: "rgba(20,10,40,0.5)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ background: "white", borderRadius: 12, width: "100%", maxWidth: 960, height: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 28px 90px rgba(20,10,40,0.28)", overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--ink-200)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-900)" }}>Flowchart — {doc.name}</div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>Read-only · drag to pan · scroll to zoom</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-500)", padding: "4px 8px", borderRadius: 4, fontSize: 20, lineHeight: 1, fontFamily: "inherit" }}>×</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {nodes.length > 0
+            ? <ReadOnlyFlowCanvas nodes={nodes} edges={edges} />
+            : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--ink-500)", fontSize: 13, fontStyle: "italic" }}>No flowchart data available.</div>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlowchartPreview({ doc, hideLabel }) {
+  const [showModal, setShowModal] = useState(false);
+  const graph = doc._snapshot?.snapshotJson || {};
+  const nodes = graph.nodes || [];
+  const decisions = nodes.filter((n) => n.type === "DECISION").length;
+  const actions = nodes.filter((n) => n.type === "ACTION").length;
+  const hasData = nodes.length > 0;
+
+  return (
+    <div style={{ marginTop: hideLabel ? 0 : 28 }}>
+      {!hideLabel && <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Flowchart preview</Mono>}
+      <div
+        onClick={hasData ? () => setShowModal(true) : undefined}
+        style={{ marginTop: 10, background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, boxShadow: "var(--shadow-sm)", overflow: "hidden", cursor: hasData ? "pointer" : "default", transition: "border-color 120ms, box-shadow 120ms" }}
+        onMouseEnter={hasData ? (e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; } : undefined}
+        onMouseLeave={hasData ? (e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; } : undefined}
+      >
+        {/* Thumbnail area */}
+        <div style={{ background: "var(--canvas-bg)", borderBottom: "1px solid var(--ink-200)", height: 92, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+          <svg width="268" height="76" viewBox="0 0 268 76" style={{ opacity: hasData ? 0.75 : 0.35 }}>
+            <rect x="4"   y="20" width="52"  height="28" rx="4" fill="oklch(0.92 0.05 200)" stroke="oklch(0.72 0.10 200)" strokeWidth="1"/>
+            <text x="30"  y="37" textAnchor="middle" fontSize="8" fontFamily="monospace" fill="oklch(0.32 0.12 200)">definition</text>
+            <rect x="76"  y="9"  width="62"  height="50" rx="4" fill="var(--purple-100)" stroke="var(--purple-300)" strokeWidth="1"/>
+            <text x="107" y="27" textAnchor="middle" fontSize="8" fontFamily="monospace" fill="var(--purple-800)">decision</text>
+            <line x1="84" y1="39" x2="130" y2="39" stroke="var(--purple-200)" strokeWidth="0.8"/>
+            <text x="107" y="50" textAnchor="middle" fontSize="7.5" fill="var(--purple-600)">A / B / C</text>
+            <rect x="160" y="4"  width="54"  height="26" rx="4" fill="oklch(0.94 0.04 155)" stroke="oklch(0.74 0.10 155)" strokeWidth="1"/>
+            <text x="187" y="19" textAnchor="middle" fontSize="8" fontFamily="monospace" fill="oklch(0.38 0.12 155)">action</text>
+            <rect x="160" y="40" width="54"  height="26" rx="4" fill="oklch(0.94 0.04 155)" stroke="oklch(0.74 0.10 155)" strokeWidth="1"/>
+            <text x="187" y="55" textAnchor="middle" fontSize="8" fontFamily="monospace" fill="oklch(0.38 0.12 155)">action</text>
+            <rect x="222" y="20" width="42"  height="26" rx="4" fill="oklch(0.94 0.04 155)" stroke="oklch(0.74 0.10 155)" strokeWidth="1"/>
+            <text x="243" y="35" textAnchor="middle" fontSize="8" fontFamily="monospace" fill="oklch(0.38 0.12 155)">action</text>
+            <path d="M56 34 C66 34 66 34 76 34" stroke="var(--ink-400)" strokeWidth="1.2" fill="none"/>
+            <path d="M138 24 C149 24 149 17 160 17" stroke="var(--ink-400)" strokeWidth="1.2" fill="none"/>
+            <path d="M138 44 C149 44 149 53 160 53" stroke="var(--ink-400)" strokeWidth="1.2" fill="none"/>
+            <path d="M138 34 C149 34 149 33 222 33" stroke="var(--ink-400)" strokeWidth="1.2" fill="none"/>
+          </svg>
+        </div>
+        {/* Footer */}
+        <div style={{ padding: "11px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontSize: 12.5, color: "var(--ink-700)" }}>
+            {hasData
+              ? <span><span style={{ fontWeight: 600 }}>{decisions}</span> decision{decisions !== 1 ? "s" : ""} · <span style={{ fontWeight: 600 }}>{actions}</span> outcome{actions !== 1 ? "s" : ""}</span>
+              : <span style={{ color: "var(--ink-400)", fontStyle: "italic" }}>No flowchart available</span>
+            }
+          </div>
+          {hasData && (
+            <button onClick={(e) => { e.stopPropagation(); setShowModal(true); }} style={{ ...primaryBtn, fontSize: 12, padding: "5px 12px" }}>
+              View full flowchart <Icon.Arrow />
+            </button>
+          )}
+        </div>
+      </div>
+      {showModal && <FlowchartModal doc={doc} onClose={() => setShowModal(false)} />}
+    </div>
+  );
+}
+
+// ── Signing Flow Steps: tabs + swimlane ──
+
+function shortAnswerLabel(text, numWords) {
+  if (!text) return "";
+  const ci = text.indexOf(":");
+  if (ci > 0 && ci <= 22) return text.slice(0, ci).trim();
+  const words = text.split(/\s+/);
+  return words.slice(0, numWords || 1).join(" ").slice(0, 24);
+}
+
+function pathTabLabel(path, actionNode) {
+  if (!path || !path.length) {
+    const t = actionNode?.content?.title || actionNode?.label || "Path";
+    return t.length > 30 ? t.slice(0, 28) + "…" : t;
+  }
+  const labels = path.map((s, i) =>
+    shortAnswerLabel(s.answerText, i === path.length - 1 ? 2 : 1)
+  ).filter(Boolean);
+  return labels.join(" — ") || "Path";
+}
+
+function findAllTerminalPaths(nodes, edges) {
+  const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const definition = nodes.find((n) => n.type === "DEFINITION");
+  const rootEdge = edges.find((e) => e.sourceNodeId === definition?.id);
+  const rootNode = rootEdge ? nodeById[rootEdge.targetNodeId] : null;
+  if (!rootNode) return [];
+  const results = [];
+  function traverse(node, cur, visited) {
+    if (!node || visited.has(node.id)) return;
+    const nv = new Set(visited); nv.add(node.id);
+    if (node.type === "ACTION") { results.push({ actionNode: node, path: [...cur] }); return; }
+    for (const edge of edges.filter((e) => e.sourceNodeId === node.id)) {
+      const answer = (node.answers || []).find((a) => a.id === edge.sourceAnswerId);
+      const next = nodeById[edge.targetNodeId];
+      if (next) traverse(next, [...cur, { decisionNode: node, answerId: edge.sourceAnswerId, answerText: answer?.text || "", question: node.content?.question || node.label }], nv);
+    }
+  }
+  traverse(rootNode, [], new Set());
+  return results;
+}
+
+const SWIMLANE_STYLES = {
+  pi:     { tagBg: "var(--purple-100)", tagColor: "var(--purple-800)", accent: "var(--purple-600)", hdrBg: "oklch(0.95 0.04 290)", hdrColor: "oklch(0.35 0.12 290)" },
+  office: { tagBg: "oklch(0.93 0.04 85)", tagColor: "oklch(0.36 0.12 85)", accent: "oklch(0.62 0.12 85)", hdrBg: "oklch(0.95 0.04 85)", hdrColor: "oklch(0.36 0.12 85)" },
+  done:   { tagBg: "rgba(46,109,72,0.12)", tagColor: "#2E6D48", accent: "#2E6D48", hdrBg: "rgba(46,109,72,0.08)", hdrColor: "#2E6D48" },
+};
+
+function SwimlaneStepCard({ num, title, desc, tag, style, materials, borderAccent }) {
+  return (
+    <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, padding: "13px 16px 12px", boxShadow: "0 1px 4px rgba(30,20,50,0.06)", borderLeft: `3px solid ${borderAccent}` }}>
+      <Mono style={{ fontSize: 9, color: "var(--ink-500)", letterSpacing: 1, textTransform: "uppercase" }}>Step {num}</Mono>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--ink-900)", marginTop: 4, lineHeight: 1.3 }}>{title}</div>
+      <div style={{ fontSize: 12.5, color: "var(--ink-700)", marginTop: 5, lineHeight: 1.5 }}>{desc}</div>
+      {materials && materials.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+          {materials.map((m, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: "var(--ink-600)", display: "flex", gap: 6, alignItems: "flex-start" }}>
+              <span style={{ color: "var(--ink-400)", flexShrink: 0 }}>·</span>{m}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 10 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 99, background: style.tagBg, color: style.tagColor }}>{tag}</span>
+      </div>
+    </div>
+  );
+}
+
+function SigningSwimlane({ pathData, allNodes }) {
+  const { actionNode, path } = pathData;
+  const assignee = actionNode.content?.assignee || "Office";
+
+  const peopleNode = allNodes.find((n) => {
+    if (n.type !== "PEOPLE") return false;
+    const al = assignee.toLowerCase();
+    const an = (n.content?.name || "").toLowerCase();
+    const ad = (n.content?.department || "").toLowerCase();
+    const a0 = al.split(/\s+/)[0];
+    const n0 = an.split(/\s+/)[0];
+    const d0 = ad.split(/\s+/)[0];
+    return (n0 && (al.includes(n0) || a0 && an.includes(a0))) ||
+           (d0 && (al.includes(d0) || a0 && ad.includes(a0)));
+  });
+
+  const columns = [
+    { label: "UW Researcher (PI)", style: SWIMLANE_STYLES.pi },
+    { label: assignee, sub: peopleNode ? `${peopleNode.content?.name}${peopleNode.content?.email ? " · " + peopleNode.content.email : ""}` : null, style: SWIMLANE_STYLES.office },
+  ];
+
+  const pathContext = path.map((s) => s.answerText).join(" → ");
+  const materials = (actionNode.content?.materials || []).map((m) => m.label).filter((l) => l && l !== "Material");
+
+  const rows = [
+    {
+      transition: null,
+      cells: [
+        { col: 0, num: 1, title: "Submit request", desc: pathContext ? `Initiate your request. Routing path: ${pathContext.length > 120 ? pathContext.slice(0, 118) + "…" : pathContext}` : "Initiate your request via the signing flow wizard.", tag: "PI initiates", style: SWIMLANE_STYLES.pi },
+        null,
+      ],
+    },
+    {
+      transition: `Received by ${assignee}`,
+      cells: [
+        null,
+        { col: 1, num: 2, title: actionNode.content?.title || actionNode.label, desc: actionNode.content?.description || "Review and process the agreement.", tag: assignee, style: SWIMLANE_STYLES.office, materials },
+      ],
+    },
+    {
+      transition: "Agreement processed — PI review required",
+      cells: [
+        { col: 0, num: 3, title: "Review & acknowledge", desc: "Review the processed agreement. Confirm all terms and provide PI signature or acknowledgment as required by your institution.", tag: "PI reviews", style: SWIMLANE_STYLES.pi },
+        null,
+      ],
+    },
+  ];
+
+  return (
+    <div style={{ marginTop: 14, overflowX: "auto" }}>
+      <div style={{ minWidth: 480 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, 1fr)`, gap: 8, marginBottom: 8 }}>
+          {columns.map((col, i) => (
+            <div key={i} style={{ padding: "9px 14px", background: col.style.hdrBg, borderRadius: 6, textAlign: "center" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: col.style.hdrColor, letterSpacing: 0.5, textTransform: "uppercase" }}>{col.label}</div>
+              {col.sub && <div style={{ fontSize: 10.5, color: col.style.hdrColor, opacity: 0.75, marginTop: 1 }}>{col.sub}</div>}
+            </div>
+          ))}
+        </div>
+
+        {rows.map((row, ri) => (
+          <React.Fragment key={ri}>
+            {row.transition && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", color: "var(--ink-500)", fontSize: 11.5 }}>
+                <div style={{ flex: 1, height: 1, background: "var(--ink-200)" }} />
+                <span>↓ {row.transition} ↓</span>
+                <div style={{ flex: 1, height: 1, background: "var(--ink-200)" }} />
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns.length}, 1fr)`, gap: 8, alignItems: "start", marginBottom: 2 }}>
+              {row.cells.map((cell, ci) =>
+                cell ? (
+                  <SwimlaneStepCard key={ci} num={cell.num} title={cell.title} desc={cell.desc} tag={cell.tag} style={cell.style} materials={cell.materials} borderAccent={cell.style.accent} />
+                ) : (
+                  <div key={ci} />
+                )
+              )}
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SigningFlowSteps({ doc, hideLabel }) {
+  const [activeTab, setActiveTab] = useState(0);
+  const graph = doc._snapshot?.snapshotJson || {};
+  const nodes = graph.nodes || [];
+  const edges = graph.edges || [];
+
+  const allPaths = useMemo(() => findAllTerminalPaths(nodes, edges), [doc]);
+  if (!allPaths.length) return null;
+
+  const safeTab = Math.min(activeTab, allPaths.length - 1);
+
+  return (
+    <div style={{ marginTop: hideLabel ? 0 : 28 }}>
+      {!hideLabel && <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Signing flow steps</Mono>}
+
+      {allPaths.length > 1 && (
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          {allPaths.map((p, i) => {
+            const label = pathTabLabel(p.path, p.actionNode);
+            const active = i === safeTab;
+            return (
+              <button key={i} onClick={() => setActiveTab(i)} style={{
+                padding: "6px 14px", borderRadius: 6, fontFamily: "inherit", cursor: "pointer",
+                fontSize: 13, fontWeight: active ? 600 : 500,
+                background: active ? "var(--ink-900)" : "white",
+                color: active ? "white" : "var(--ink-700)",
+                border: `1px solid ${active ? "var(--ink-900)" : "var(--ink-200)"}`,
+                transition: "all 120ms",
+              }}>{label}</button>
+            );
+          })}
+        </div>
+      )}
+
+      <SigningSwimlane pathData={allPaths[safeTab]} allNodes={nodes} />
+
+      <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 18, padding: "10px 0", borderTop: "1px solid var(--ink-200)" }}>
+        {[
+          { dot: "var(--purple-600)", label: "PI / Researcher action" },
+          { dot: "oklch(0.62 0.12 85)", label: "Office / CoMotion review" },
+        ].map(({ dot, label }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ink-500)" }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flexShrink: 0, display: "inline-block" }} />{label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SigningFlowModal({ doc, onClose, onContact }) {
+  const [stage, setStage] = useState("questions");
+  const [graphResultNode, setGraphResultNode] = useState(null);
+  const [graphPath, setGraphPath] = useState([]);
+  const [answers, setAnswers] = useState({});
+  const [situationOverrides, setSituationOverrides] = useState({});
+  const isBackendFlow = Boolean(doc?._snapshot);
+
+  const customizeQuestions = useMemo(() => {
+    if (isBackendFlow && graphPath.length > 0) {
+      return graphPath.map(({ node }) => ({
+        id: node.id,
+        title: node.content?.question || node.label,
+        options: (node.answers || []).map((a) => ({ value: a.id, label: a.text })),
+      }));
+    }
+    return doc?.flow?.questions || [];
+  }, [isBackendFlow, graphPath, doc]);
+
+  const customizeAnswers = useMemo(() => {
+    if (isBackendFlow && graphPath.length > 0) {
+      return Object.fromEntries(graphPath.map(({ node, answerId }) => [node.id, answerId]));
+    }
+    return answers;
+  }, [isBackendFlow, graphPath, answers]);
+
+  const steps = useMemo(() => {
+    if (stage !== "results") return [];
+    if (isBackendFlow && graphResultNode) {
+      return [{ office: graphResultNode.content?.assignee || "UW CoMotion", contact: "comotion_legal", action: graphResultNode.content?.title || graphResultNode.label, materials: (graphResultNode.content?.materials || []).map((m) => m.label) }];
+    }
+    if (doc?.flow?.compute) return doc.flow.compute({ ...answers, ...situationOverrides });
+    return [];
+  }, [stage, answers, situationOverrides, doc, isBackendFlow, graphResultNode]);
+
+  function handleGraphResult(actionNode, path) { setGraphResultNode(actionNode); setGraphPath(path || []); setStage("results"); }
+  function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
+  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultNode(null); setGraphPath([]); }
+  function handleBackdropClick(e) { if (e.target === e.currentTarget) onClose(); }
+
+  return (
+    <div onClick={handleBackdropClick} style={{ position: "fixed", inset: 0, background: "rgba(20,10,40,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "white", borderRadius: 12, width: "100%", maxWidth: 560, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(20,10,40,0.22)" }}>
+        <div style={{ padding: "22px 28px 18px", borderBottom: "1px solid var(--ink-200)", flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-headline)", fontSize: 19, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.3 }}>Find a signing flow</div>
+              <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 3 }}>{doc.name}</div>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-400)", padding: "4px 8px", borderRadius: 4, fontSize: 20, lineHeight: 1, fontFamily: "inherit" }}>×</button>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px 28px" }}>
+          {stage === "questions" ? (
+            isBackendFlow
+              ? <GraphDocWizard snapshot={doc._snapshot} onResult={handleGraphResult} onCancel={onClose} />
+              : <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={onClose} />
+          ) : (
+            <div>
+              <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Pill tone="success"><Icon.Check /> Flow generated</Pill>
+                  <span style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+                </div>
+                <button onClick={restartFlow} style={{ ...linkBtn, fontSize: 12 }}><Icon.Refresh /> Restart</button>
+              </div>
+              <StepResults
+                steps={steps}
+                situationOverrides={situationOverrides}
+                onSituationChange={(key, val) => setSituationOverrides({ ...situationOverrides, [key]: val })}
+                onContact={(key) => { onClose(); onContact(key); }}
+              />
+              {customizeQuestions.length > 0 && (
+                <div style={{ marginTop: 24 }}>
+                  <CustomizePanel questions={customizeQuestions} answers={customizeAnswers} />
+                </div>
+              )}
+              <div style={{ marginTop: 24, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button style={ghostBtn} onClick={onClose}>Close</button>
+                <button style={primaryBtn}>Apply now <Icon.Arrow /></button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MyRequestsSigningModal({ docs, onClose, onContact }) {
+  const [selectedDocId, setSelectedDocId] = useState(null);
+  const selectedDoc = docs.find((d) => d.id === selectedDocId);
+  if (selectedDoc) return <SigningFlowModal doc={selectedDoc} onClose={onClose} onContact={onContact} />;
+
+  function handleBackdropClick(e) { if (e.target === e.currentTarget) onClose(); }
+
+  return (
+    <div onClick={handleBackdropClick} style={{ position: "fixed", inset: 0, background: "rgba(20,10,40,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "white", borderRadius: 12, width: "100%", maxWidth: 560, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(20,10,40,0.22)" }}>
+        <div style={{ padding: "22px 28px 18px", borderBottom: "1px solid var(--ink-200)", flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-headline)", fontSize: 19, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.3 }}>Find a signing flow</div>
+              <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 3 }}>Question 01 — select a document type</div>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-400)", padding: "4px 8px", borderRadius: 4, fontSize: 20, lineHeight: 1, fontFamily: "inherit" }}>×</button>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px 28px" }}>
+          <div style={{ fontFamily: "var(--font-headline)", fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 14 }}>
+            What type of document are you applying for?
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {docs.map((doc, i) => (
+              <button key={doc.id} onClick={() => setSelectedDocId(doc.id)} style={{
+                textAlign: "left", display: "flex", alignItems: "flex-start", gap: 12,
+                padding: "12px 14px", background: "white", border: "1px solid var(--ink-200)",
+                borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-400)"; e.currentTarget.style.background = "var(--purple-50)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.background = "white"; }}
+              >
+                <div style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 4, border: "1px solid var(--ink-300)", color: "var(--ink-700)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, marginTop: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {String.fromCharCode(65 + i)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink-900)" }}>
+                    <Mono style={{ fontSize: 11, color: "var(--purple-700)", marginRight: 6 }}>{doc.abbrev}</Mono>
+                    {doc.name}
+                  </div>
+                  {doc.summary && <div style={{ fontSize: 12.5, color: "var(--ink-700)", marginTop: 3, lineHeight: 1.45 }}>{doc.summary}</div>}
+                </div>
+                <Icon.Arrow style={{ color: "var(--ink-400)", flexShrink: 0, marginTop: 3 }} />
+              </button>
+            ))}
+            {docs.length === 0 && (
+              <div style={{ fontSize: 13, color: "var(--ink-500)", fontStyle: "italic", padding: "20px 0" }}>No published document types available yet.</div>
+            )}
+          </div>
+          <div style={{ marginTop: 16, padding: "12px 14px", background: "var(--ink-50)", border: "1px solid var(--ink-200)", borderRadius: 6 }}>
+            <span style={{ fontSize: 12.5, color: "var(--ink-700)" }}>Not sure which applies to you? </span>
+            <button onClick={onClose} style={{ ...linkBtn, fontSize: 12.5, verticalAlign: "baseline" }}>
+              Browse all agreement types in the Knowledge Base <Icon.Arrow />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MyRequestsView({ docs = [], onNavigateKB }) {
+  const [showModal, setShowModal] = useState(false);
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--canvas-bg)" }}>
+      <div style={{ padding: "24px 40px 20px", borderBottom: "1px solid var(--ink-200)", background: "white", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+        <div>
+          <div style={{ fontFamily: "var(--font-headline)", fontSize: 22, color: "var(--ink-900)", letterSpacing: -0.4, fontWeight: 700 }}>My requests</div>
+          <div style={{ marginTop: 4, fontSize: 13, color: "var(--ink-700)" }}>Track your submitted and in-progress agreement requests.</div>
+        </div>
+        <button onClick={() => setShowModal(true)} style={{ ...primaryBtn, fontSize: 13, padding: "9px 16px", flexShrink: 0 }}>
+          Find a signing flow <Icon.Arrow />
+        </button>
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, color: "var(--ink-500)", padding: 40 }}>
+        <Mono style={{ fontSize: 10.5, letterSpacing: 0.6 }}>STUB</Mono>
+        <div style={{ fontSize: 13, maxWidth: 360, textAlign: "center", lineHeight: 1.5 }}>In-flight and submitted document requests across all offices live here. Out of scope for this prototype.</div>
+      </div>
+      {showModal && (
+        <MyRequestsSigningModal docs={docs} onClose={() => setShowModal(false)} onContact={() => setShowModal(false)} />
+      )}
+    </div>
+  );
+}
+
 function DocumentTypesIndex({ onPick, docs = [] }) {
   const [q, setQ] = useState("");
   const filtered = docs.filter((d) => {
@@ -553,66 +1179,59 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
 
 function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
   const doc = docs.find((d) => d.id === docId) || DOC_BY_ID[docId];
-  const [stage, setStage] = useState("questions");
-  const [answers, setAnswers] = useState({});
-  const [situationOverrides, setSituationOverrides] = useState({});
-  const [graphResultNode, setGraphResultNode] = useState(null);
-  const [graphPath, setGraphPath] = useState([]);  // [{ node, answerId }]
+  const [showModal, setShowModal] = useState(false);
+  const [activeSection, setActiveSection] = useState("description");
+  const scrollRef = useRef(null);
+  const sectRefs = useRef({});
 
-  const isBackendFlow = Boolean(doc?._snapshot);
+  const NAV_ITEMS = [
+    { id: "description", label: "Description" },
+    { id: "offices",     label: "Related Offices" },
+    { id: "templates",   label: "Available Templates" },
+    { id: "flowchart",   label: "Flowchart Preview" },
+    { id: "signing",     label: "Signing Flow Steps" },
+    { id: "processing",  label: "Processing Time" },
+    { id: "apply",       label: "Still don't know how to apply?" },
+  ];
 
-  // Questions in traversal order for Stage 3
-  const customizeQuestions = useMemo(() => {
-    if (isBackendFlow && graphPath.length > 0) {
-      return graphPath.map(({ node }) => ({
-        id: node.id,
-        title: node.content?.question || node.label,
-        options: (node.answers || []).map((a) => ({ value: a.id, label: a.text })),
-      }));
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    function updateActive() {
+      const containerTop = container.getBoundingClientRect().top;
+      let current = NAV_ITEMS[0].id;
+      for (const { id } of NAV_ITEMS) {
+        const el = document.getElementById("ksec-" + id);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top - containerTop <= 48) current = id;
+      }
+      setActiveSection(current);
     }
-    return doc?.flow?.questions || [];
-  }, [isBackendFlow, graphPath, doc]);
+    updateActive();
+    container.addEventListener("scroll", updateActive, { passive: true });
+    return () => container.removeEventListener("scroll", updateActive);
+  }, [doc?.id]);
 
-  // Answers keyed by nodeId for Stage 3
-  const customizeAnswers = useMemo(() => {
-    if (isBackendFlow && graphPath.length > 0) {
-      return Object.fromEntries(graphPath.map(({ node, answerId }) => [node.id, answerId]));
-    }
-    return answers;
-  }, [isBackendFlow, graphPath, answers]);
+  function scrollTo(id) {
+    const container = scrollRef.current;
+    if (!container) return;
+    const el = document.getElementById("ksec-" + id);
+    if (!el) return;
+    setActiveSection(id);
+    container.scrollTop = el.getBoundingClientRect().top
+      - container.getBoundingClientRect().top
+      + container.scrollTop
+      - 24;
+  }
 
-  const steps = useMemo(() => {
-    if (stage !== "results") return [];
-    if (isBackendFlow && graphResultNode) {
-      return [{
-        office: graphResultNode.content?.assignee || "UW CoMotion",
-        contact: "comotion_legal",
-        action: graphResultNode.content?.title || graphResultNode.label,
-        materials: (graphResultNode.content?.materials || []).map((m) => m.label),
-      }];
-    }
-    return doc.flow.compute({ ...answers, ...situationOverrides });
-  }, [stage, answers, situationOverrides, doc, isBackendFlow, graphResultNode]);
+  function reg(id) { return (el) => { sectRefs.current[id] = el; }; }
 
-  function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
-  function handleGraphResult(actionNode, path) { setGraphResultNode(actionNode); setGraphPath(path || []); setStage("results"); }
-  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultNode(null); setGraphPath([]); }
+  if (!doc) return null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--canvas-bg)" }}>
-      <div style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-        width: "100%",
-        background: "rgba(255,255,255,0.96)",
-        borderBottom: "1px solid var(--ink-200)",
-        boxShadow: "0 1px 3px rgba(40,20,70,0.04)",
-        padding: "12px 40px",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        flexShrink: 0,
-      }}>
+      {/* Breadcrumb bar */}
+      <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(255,255,255,0.96)", borderBottom: "1px solid var(--ink-200)", boxShadow: "0 1px 3px rgba(40,20,70,0.04)", padding: "12px 40px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
           <Icon.Back /> Document types
         </button>
@@ -620,22 +1239,52 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
         <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        <div style={{ display: "flex", alignItems: "flex-start" }}>
-        <div style={{ flex: "0 0 50%", minWidth: 0, padding: "24px 32px 64px" }}>
-          <section>
+      {/* Body: scroll area fills full width; nav overlaid via absolute position */}
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
+
+        {/* Section nav — absolutely overlaid, does not affect content width or centering */}
+        <div className="doc-secnav-panel">
+          <nav className="doc-secnav">
+            {NAV_ITEMS.map(({ id, label }) => {
+              const active = id === activeSection;
+              return (
+                <button key={id} onClick={() => scrollTo(id)} style={{
+                  display: "block", width: "100%", textAlign: "left",
+                  background: "none", border: "none",
+                  borderLeft: `2px solid ${active ? "var(--purple-600)" : "var(--ink-200)"}`,
+                  padding: "6px 0 6px 12px", marginBottom: 2,
+                  fontSize: 12.5, fontWeight: active ? 600 : 400,
+                  color: active ? "var(--purple-700)" : "var(--ink-400)",
+                  cursor: "pointer", fontFamily: "inherit",
+                  lineHeight: 1.4, transition: "color 120ms, border-color 120ms",
+                }}>
+                  {label}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Scroll container — full width so maxWidth:760 content stays centered */}
+        <div ref={scrollRef} style={{ width: "100%", height: "100%", overflowY: "auto" }}>
+          <div style={{ maxWidth: 760, margin: "0 auto", padding: "32px 40px 80px" }}>
+
+            {/* Title */}
             <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
               <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{doc.name}</div>
               <Pill tone="outline">{doc.abbrev}</Pill>
             </div>
-            <div style={{ marginTop: 18 }}>
-              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Description</Mono>
-              <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", maxWidth: 600 }}>{doc.definition}</div>
+
+            {/* Description */}
+            <div id="ksec-description" ref={reg("description")} data-sid="description" style={{ marginTop: 36, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Description</div>
+              <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)" }}>{doc.definition}</div>
             </div>
 
-            <div style={{ marginTop: 24, maxWidth: 600 }}>
-              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Related offices</Mono>
-              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+            {/* Related Offices */}
+            <div id="ksec-offices" ref={reg("offices")} data-sid="offices" style={{ marginTop: 44, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Related Offices</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {doc.offices.map((k) => {
                   const c = CONTACTS[k];
                   return (
@@ -655,9 +1304,10 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
               </div>
             </div>
 
-            <div style={{ marginTop: 24, maxWidth: 600 }}>
-              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Available templates</Mono>
-              <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, width: "100%" }}>
+            {/* Available Templates */}
+            <div id="ksec-templates" ref={reg("templates")} data-sid="templates" style={{ marginTop: 44, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Available Templates</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                 {doc.templates.map((t, i) => (
                   <a key={i} href="#" onClick={(e) => e.preventDefault()} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, textDecoration: "none", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
                   onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
@@ -674,15 +1324,24 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
               </div>
             </div>
 
-            <div style={{ marginTop: 24, maxWidth: 600 }}>
-              <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Processing time</Mono>
-              <div style={{ marginTop: 10, padding: "12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, boxShadow: "var(--shadow-sm)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, width: "100%" }}>
-                  {[
-                    { label: "1-3 days", pct: 42 },
-                    { label: "3-7 days", pct: 38 },
-                    { label: ">7 days", pct: 20 },
-                  ].map((item) => (
+            {/* Flowchart Preview */}
+            <div id="ksec-flowchart" ref={reg("flowchart")} data-sid="flowchart" style={{ marginTop: 44, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Flowchart Preview</div>
+              <FlowchartPreview doc={doc} hideLabel />
+            </div>
+
+            {/* Signing Flow Steps */}
+            <div id="ksec-signing" ref={reg("signing")} data-sid="signing" style={{ marginTop: 44, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Signing Flow Steps</div>
+              <SigningFlowSteps doc={doc} hideLabel />
+            </div>
+
+            {/* Processing Time */}
+            <div id="ksec-processing" ref={reg("processing")} data-sid="processing" style={{ marginTop: 44, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Processing Time</div>
+              <div style={{ padding: "12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, boxShadow: "var(--shadow-sm)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+                  {[{ label: "1-3 days", pct: 42 }, { label: "3-7 days", pct: 38 }, { label: ">7 days", pct: 20 }].map((item) => (
                     <div key={item.label}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: "var(--ink-700)" }}>
                         <span>{item.label}</span>
@@ -706,59 +1365,26 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
                 </div>
               </div>
             </div>
-          </section>
-        </div>
 
-        <div style={{ width: 1, background: "var(--ink-200)", alignSelf: "stretch", flexShrink: 0, marginTop: 24, marginBottom: 24 }} />
-        <div style={{ flex: "0 0 50%", minWidth: 0, background: "var(--canvas-bg)" }}>
-          <div style={{ padding: "24px 32px 64px" }}>
-            <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700, lineHeight: 1.2 }}>
-              Find a signing flow
-            </div>
-            <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>
-              Answer a few questions to get a customized routing for your {doc.abbrev}.
-            </div>
-
-            <div style={{ marginTop: 16 }}>
-              {stage === "questions" ? (
-                <>
-                  {isBackendFlow && (
-                    <GraphDocWizard snapshot={doc._snapshot} onResult={handleGraphResult} onCancel={() => setStage("questions")} />
-                  )}
-                  {!isBackendFlow && (
-                    <DocWizard doc={doc} initialAnswers={answers} onApply={applyAnswers} onCancel={() => setAnswers({})} />
-                  )}
-                </>
-              ) : (
-                <>
-                  <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, flexWrap: "wrap", boxShadow: "var(--shadow-sm)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Pill tone="success"><Icon.Check /> Flow generated</Pill>
-                      <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
-                    </div>
-                    <button onClick={restartFlow} style={{ ...linkBtn, fontSize: 12 }}><Icon.Refresh /> Restart</button>
-                  </div>
-
-                  <StepResults
-                    steps={steps}
-                    situationOverrides={situationOverrides}
-                    onSituationChange={(key, val) => setSituationOverrides({ ...situationOverrides, [key]: val })}
-                    onContact={onContact}
-                  />
-
-                  <div style={{ marginTop: 24 }}>
-                    <CustomizePanel
-                      questions={customizeQuestions}
-                      answers={customizeAnswers}
-                    />
-                  </div>
-                </>
-              )}
+            {/* Still don't know / CTA */}
+            <div id="ksec-apply" ref={reg("apply")} data-sid="apply" style={{ marginTop: 44, scrollMarginTop: 24 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Still don't know how to apply?</div>
+              <div style={{ padding: "28px 32px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 10, boxShadow: "var(--shadow-sm)" }}>
+                <button onClick={() => setShowModal(true)} style={{ ...primaryBtn, fontSize: 14, padding: "10px 22px", borderRadius: 8 }}>
+                  Find a signing flow <Icon.Arrow />
+                </button>
+                <div style={{ fontSize: 13, color: "var(--ink-700)", lineHeight: 1.5 }}>
+                  Answer a few questions to get your personalized routing.
+                </div>
+              </div>
             </div>
           </div>
         </div>
-        </div>
       </div>
+
+      {showModal && (
+        <SigningFlowModal doc={doc} onClose={() => setShowModal(false)} onContact={onContact} />
+      )}
     </div>
   );
 }

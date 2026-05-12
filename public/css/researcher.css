@@ -219,3 +219,32 @@
   }
 
   .researcher-sidebar-collapsed .researcher-nav-item:hover::after { opacity: 1; }
+
+  /* Document detail — section nav panel */
+  .doc-secnav-panel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 200px;          /* 40px gap from sidebar edge + 160px nav */
+    padding-left: 40px;
+    display: flex;
+    align-items: center;   /* vertically center nav while content scrolls */
+    z-index: 10;
+    pointer-events: none;  /* transparent to clicks in the padding / empty area */
+  }
+
+  .doc-secnav-panel * {
+    pointer-events: auto;  /* nav buttons remain clickable */
+  }
+
+  .doc-secnav {
+    width: 160px;
+  }
+
+  /* Collapse section nav on narrow viewports to prevent overlap */
+  @media (max-width: 1100px) {
+    .doc-secnav-panel {
+      display: none;
+    }
+  }

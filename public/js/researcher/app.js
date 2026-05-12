@@ -1,30 +1,8 @@
-function KnowledgeBase({ mode, setMode }) {
+function KnowledgeBase({ mode, setMode, publicDocs }) {
   const [docId, setDocId] = useState(null);
   const [contactKey, setContactKey] = useState(null);
-  const [publicDocs, setPublicDocs] = useState([]);
 
   useEffect(() => { setDocId(null); setContactKey(null); }, [mode]);
-  useEffect(() => {
-    let alive = true;
-    async function loadPublicDocs() {
-      try {
-        const listRes = await fetch(`${API_BASE}/knowledge-base`);
-        const listData = await listRes.json();
-        const items = listData.items || [];
-        if (!items.length) return;
-        const snapshots = await Promise.all(items.map(async (item) => {
-          const detailRes = await fetch(`${API_BASE}/knowledge-base/${item.id}`);
-          const detailData = await detailRes.json();
-          return detailData.snapshot;
-        }));
-        if (alive) setPublicDocs(snapshots.filter(Boolean).map(snapshotToDoc));
-      } catch {
-        if (alive) setPublicDocs([]);
-      }
-    }
-    loadPublicDocs();
-    return () => { alive = false; };
-  }, []);
 
   function handleContact(key) { setMode("contacts"); setContactKey(key); }
 
@@ -52,9 +30,32 @@ function StubTab({ name, blurb }) {
 function Portal() {
   const [active, setActive] = useState("Knowledge base");
   const [kbMode, setKbMode] = useState("documents");
+  const [publicDocs, setPublicDocs] = useState([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [sidebarDragWidth, setSidebarDragWidth] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    async function loadPublicDocs() {
+      try {
+        const listRes = await fetch(`${API_BASE}/knowledge-base`);
+        const listData = await listRes.json();
+        const items = listData.items || [];
+        if (!items.length) return;
+        const snapshots = await Promise.all(items.map(async (item) => {
+          const detailRes = await fetch(`${API_BASE}/knowledge-base/${item.id}`);
+          const detailData = await detailRes.json();
+          return detailData.snapshot;
+        }));
+        if (alive) setPublicDocs(snapshots.filter(Boolean).map(snapshotToDoc));
+      } catch {
+        if (alive) setPublicDocs([]);
+      }
+    }
+    loadPublicDocs();
+    return () => { alive = false; };
+  }, []);
+
   const sidebarResizeStart = useRef(null);
   const sidebarDragWidthRef = useRef(null);
   const sidebarExpandedWidth = 220;
@@ -123,8 +124,8 @@ function Portal() {
       <TopBar />
       <LeftSidebar active={active} setActive={handleSetActive} collapsed={sidebarCollapsed} dragging={sidebarDragging} onResizeStart={handleSidebarResizeStart} />
       <div style={{ gridArea: "main", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-        {active === "Knowledge base" && <KnowledgeBase mode={kbMode} setMode={handleSetKbMode} />}
-        {active === "My requests" && <StubTab name="My requests" blurb="In-flight and submitted document requests across all offices live here. Out of scope for this prototype." />}
+        {active === "Knowledge base" && <KnowledgeBase mode={kbMode} setMode={handleSetKbMode} publicDocs={publicDocs} />}
+        {active === "My requests" && <MyRequestsView docs={publicDocs} />}
         {active === "Messages" && <StubTab name="Messages" blurb="Threaded conversations with the offices handling your requests. Out of scope for this prototype." />}
       </div>
     </div>

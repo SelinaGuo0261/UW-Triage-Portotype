@@ -289,18 +289,11 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
 
       {node.type === 'decision' && (
         <div className="node-answers">
-          {node.answers.map((a) => (
-            <div key={a.id} className="node-answer" style={{ position: 'relative' }}>
-              <span className="answer-bullet" />
-              <input className="answer-input" value={a.label} onChange={(e) => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, label: e.target.value } : x) })} onPointerDown={(e) => e.stopPropagation()} placeholder="Answer label" />
+          {node.answers.map((a, i) => (
+            <div key={a.id} className="node-answer">
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: 'var(--purple-700)', background: 'var(--purple-100)', borderRadius: 3, padding: '1px 4px', flexShrink: 0, lineHeight: 1.4 }}>{i + 1}</span>
+              <textarea className="answer-input" value={a.label} onChange={(e) => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, label: e.target.value } : x) })} onPointerDown={(e) => e.stopPropagation()} placeholder="Answer label" rows={1} />
               <button className="answer-remove" onClick={() => onUpdate({ answers: node.answers.filter(x => x.id !== a.id) })}><Icon.X /></button>
-              <div
-                className={`port output ${isConnectedAsSource(a.id) ? 'connected' : ''} ${hoverPort?.node === node.id && hoverPort?.port === a.id ? 'hot' : ''}`}
-                style={{ top: '50%', transform: 'translateY(-50%)' }}
-                onPointerDown={(e) => onStartConn(e, node, a.id)}
-                onPointerEnter={() => setHoverPort({ node: node.id, port: a.id })}
-                onPointerLeave={() => setHoverPort(null)}
-              />
             </div>
           ))}
           {!readOnly && <button className="node-add-answer" onClick={() => onUpdate({ answers: [...node.answers, { id: 'a' + Math.random(), label: 'New answer' }] })} onPointerDown={(e) => e.stopPropagation()}>
@@ -308,6 +301,18 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
           </button>}
         </div>
       )}
+      {/* Answer ports — positioned relative to the .node div using the same formula as portPos,
+          so lines and dots are always perfectly co-located */}
+      {!readOnly && node.type === 'decision' && node.answers.map((a, i) => (
+        <div
+          key={`pt-${a.id}`}
+          className={`port output ${isConnectedAsSource(a.id) ? 'connected' : ''} ${hoverPort?.node === node.id && hoverPort?.port === a.id ? 'hot' : ''}`}
+          style={{ right: '-7px', top: `${71 + i * 44 + 22}px`, transform: 'translateY(-50%)' }}
+          onPointerDown={(e) => onStartConn(e, node, a.id)}
+          onPointerEnter={() => setHoverPort({ node: node.id, port: a.id })}
+          onPointerLeave={() => setHoverPort(null)}
+        />
+      ))}
 
       {node.type === 'action' && (
         <div className="node-action-body" style={{ paddingBottom: 0 }}>
@@ -646,7 +651,10 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     const d = bezier(p1, p2);
     const isSel = selected?.type === 'edge' && selected.id === e.id;
     let label = '';
-    if (a.type === 'decision' && e.fromPort !== 'out') label = a.answers?.find(ans => ans.id === e.fromPort)?.label || '';
+    if (a.type === 'decision' && e.fromPort !== 'out') {
+      const idx = a.answers?.findIndex(ans => ans.id === e.fromPort);
+      if (idx >= 0) label = String(idx + 1);
+    }
     const midX = (p1.x + p2.x) / 2, midY = (p1.y + p2.y) / 2;
     return (
       <g key={e.id}>
@@ -654,8 +662,8 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
         <path className={`edge-path ${isSel ? 'selected' : ''}`} d={d} markerEnd="url(#arrowhead)" />
         {label && (
           <g style={{ pointerEvents: 'none' }}>
-            <rect className="edge-label-bg" x={midX - (label.length * 3.3 + 8)} y={midY - 9} width={label.length * 6.6 + 16} height={18} rx={9} />
-            <text className="edge-label" x={midX} y={midY + 3} textAnchor="middle">{label}</text>
+            <circle cx={midX} cy={midY} r={9} fill="white" stroke="var(--purple-600)" strokeWidth="1.2" />
+            <text x={midX} y={midY + 3.5} textAnchor="middle" fontSize="9" fontFamily="'JetBrains Mono', monospace" fill="var(--purple-700)" fontWeight="700">{label}</text>
           </g>
         )}
       </g>

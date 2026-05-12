@@ -403,7 +403,7 @@ const nodeHeight = (node) => {
   if (node.type === 'action') { const m = node.materials?.length || 0; return 104 + (node.assignee ? 32 : 0) + 28 + m * 28 + 26; }
   if (node.type === 'publish') return 80;
   if (node.type === 'people') return node.email ? 104 : 86;
-  return 72 + (node.answers?.length || 0) * 28 + 30;
+  return 72 + (node.answers?.length || 0) * 44 + 30;
 };
 
 const portPos = (node, portId) => {
@@ -420,8 +420,8 @@ const portPos = (node, portId) => {
   }
   const idx = node.answers?.findIndex(a => a.id === portId);
   if (idx < 0) return { x: node.x + NODE_W, y: node.y + h / 2 };
-  const answerTop = 42 + 10 + 18 + 6;
-  return { x: node.x + NODE_W, y: node.y + answerTop + idx * 28 + 14 };
+  const answerTop = 71; // node-head (~37px) + node-title (~34px)
+  return { x: node.x + NODE_W, y: node.y + answerTop + idx * 44 + 22 };
 };
 
 const bezier = (a, b) => {
