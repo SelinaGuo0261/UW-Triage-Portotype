@@ -24,11 +24,25 @@ function App() {
   const saveTimer = useRef(null);
   const sidebarResizeStart = useRef(null);
   const sidebarDragWidthRef = useRef(null);
+  const toastTimerRef = useRef(null);
 
-  const pushToast = useCallback((text) => {
+  const TOAST_DEFAULT_MS = 1500;
+
+  /** Replaces any existing toast. Each toast stays at least `duration` ms (default 1500) unless replaced sooner. */
+  const pushToast = useCallback((text, opts = {}) => {
+    const duration = opts.duration !== undefined ? opts.duration : TOAST_DEFAULT_MS;
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
     const id = 't' + Date.now() + Math.random();
-    setToasts(ts => [...ts, { id, text }]);
-    setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 2400);
+    setToasts([{ id, text }]);
+    if (duration > 0) {
+      toastTimerRef.current = setTimeout(() => {
+        setToasts((ts) => (ts.length === 1 && ts[0]?.id === id ? [] : ts));
+        toastTimerRef.current = null;
+      }, duration);
+    }
   }, []);
 
   const registerAdders = useCallback((a) => setAdders(a), []);
