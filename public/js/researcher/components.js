@@ -2,6 +2,22 @@
 // GraphDocWizard — 基于图遍历的向导（用于 backend 发布的 flow）
 // ─────────────────────────────────────────────
 
+function graphOutgoingEdges(edges, sourceNodeId) {
+  return edges.filter((e) => e.sourceNodeId === sourceNodeId);
+}
+
+function graphActionHasOutgoing(node, edges) {
+  return Boolean(node && node.type === "ACTION" && graphOutgoingEdges(edges, node.id).length);
+}
+
+function graphFollowActionContinue(node, edges, nodeById) {
+  const outs = graphOutgoingEdges(edges, node.id);
+  if (!outs.length) return null;
+  const preferred = outs.find((e) => e.sourceAnswerId == null || e.sourceAnswerId === "");
+  const edge = preferred || outs[0];
+  return nodeById[edge.targetNodeId] || null;
+}
+
 function GraphDocWizard({ snapshot, onResult, onCancel }) {
   const graph = snapshot?.snapshotJson || {};
   const nodes = graph.nodes || [];
@@ -13,16 +29,18 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
   const rootNode = nodeById[rootEdge?.targetNodeId];
 
   const [currentNode, setCurrentNode] = React.useState(rootNode);
-  const [path, setPath] = React.useState([]);  // { node, answerId }[]
+  const [path, setPath] = React.useState([]);  // { node, answerId }[] — DECISION steps only
+  const [actionTrail, setActionTrail] = React.useState([]); // ACTION chain for Back within ACTION→ACTION
 
   React.useEffect(() => {
     if (!rootNode || rootNode.type !== "ACTION") return undefined;
+    if (graphActionHasOutgoing(rootNode, edges)) return undefined;
     let cancelled = false;
     Promise.resolve().then(() => {
       if (!cancelled) onResult(rootNode, []);
     });
     return () => { cancelled = true; };
-  }, [rootNode, onResult]);
+  }, [rootNode, onResult, edges]);
 
   if (!rootNode) return (
     <div style={{ padding: 20, color: "var(--ink-500)", fontSize: 13 }}>
@@ -30,12 +48,25 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
     </div>
   );
 
-  if (rootNode.type === "ACTION") {
+  if (rootNode.type === "ACTION" && !graphActionHasOutgoing(rootNode, edges)) {
     return (
       <div style={{ padding: 24, color: "var(--ink-600)", fontSize: 13, textAlign: "center" }}>
         Preparing outcome…
       </div>
     );
+  }
+
+  function advanceFromAction() {
+    const next = graphFollowActionContinue(currentNode, edges, nodeById);
+    if (!next) return;
+    if (currentNode.type === "ACTION") {
+      setActionTrail((t) => [...t, currentNode]);
+    }
+    if (next.type === "ACTION" && !graphActionHasOutgoing(next, edges)) {
+      onResult(next, path);
+      return;
+    }
+    setCurrentNode(next);
   }
 
   function pick(answerId) {
@@ -47,23 +78,98 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
 
     const newPath = [...path, { node: currentNode, answerId }];
     setPath(newPath);
+    setActionTrail([]);
 
     if (nextNode.type === "ACTION") {
-      onResult(nextNode, newPath);   // 到达终态，交给父组件展示结果
+      if (graphActionHasOutgoing(nextNode, edges)) {
+        setCurrentNode(nextNode);
+      } else {
+        onResult(nextNode, newPath);
+      }
     } else {
       setCurrentNode(nextNode);
     }
   }
 
   function back() {
+    if (currentNode.type === "DECISION" && path.length === 0 && actionTrail.length > 0) {
+      const prev = actionTrail[actionTrail.length - 1];
+      setActionTrail((t) => t.slice(0, -1));
+      setCurrentNode(prev);
+      return;
+    }
+    if (currentNode.type === "ACTION") {
+      if (actionTrail.length > 0) {
+        const prev = actionTrail[actionTrail.length - 1];
+        setActionTrail((t) => t.slice(0, -1));
+        setCurrentNode(prev);
+        return;
+      }
+      if (path.length === 0) { onCancel(); return; }
+      const prev = path[path.length - 1];
+      setPath(path.slice(0, -1));
+      setCurrentNode(prev.node);
+      return;
+    }
     if (path.length === 0) { onCancel(); return; }
     const prev = path[path.length - 1];
     setPath(path.slice(0, -1));
     setCurrentNode(prev.node);
   }
 
+  if (currentNode.type === "ACTION") {
+    const title = currentNode.content?.title || currentNode.label || "Step";
+    const desc = currentNode.content?.description || "";
+    const mats = (currentNode.content?.materials || []).map((m) => m.label).filter(Boolean);
+    return (
+      <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+        <div style={{ padding: "20px 28px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <button onClick={back} style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "var(--ink-700)", fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+              <Icon.Back /> {path.length === 0 && actionTrail.length === 0 ? "Cancel" : "Back"}
+            </button>
+            <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5 }}>
+              ACTION STEP
+            </Mono>
+          </div>
+        </div>
+        <div style={{ padding: "28px 28px 8px" }}>
+          <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, lineHeight: 1.3, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700 }}>
+            {title}
+          </div>
+          {desc && (
+            <div style={{ marginTop: 12, fontSize: 13.5, color: "var(--ink-700)", lineHeight: 1.5 }}>{desc}</div>
+          )}
+          {mats.length > 0 && (
+            <div style={{ marginTop: 14, fontSize: 12.5, color: "var(--ink-600)" }}>
+              <Mono style={{ fontSize: 9, color: "var(--ink-500)" }}>MATERIALS</Mono>
+              <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+                {mats.slice(0, 6).map((l, i) => <li key={i} style={{ marginBottom: 4 }}>{l}</li>)}
+              </ul>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={advanceFromAction}
+            style={{ marginTop: 22, ...primaryBtn, width: "100%", justifyContent: "center" }}
+          >
+            继续 <Icon.Arrow />
+          </button>
+        </div>
+        <div style={{ marginTop: 12, padding: "12px 28px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)" }}>
+          <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
+            Review this action, then continue to the next step in the flow.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const stepNum = path.length + 1;
-  const stepOptions = (currentNode.answers || []).map((a) => ({ value: a.id, label: a.text }));
+  const stepOptions = (currentNode.answers || []).map((a) => {
+    const rat = String(a.rationale || "").trim();
+    return { value: a.id, label: a.text, sub: rat || undefined };
+  });
 
   return (
     <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
@@ -93,7 +199,12 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
               <div style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 4, border: "1px solid var(--ink-300)", color: "var(--ink-700)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, marginTop: 1 }}>
                 {String.fromCharCode(65 + i)}
               </div>
-              <div style={{ flex: 1, fontSize: 13.5, fontWeight: 500, lineHeight: 1.4, color: "var(--ink-900)" }}>{opt.label}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 500, lineHeight: 1.4, color: "var(--ink-900)" }}>{opt.label}</div>
+                {opt.sub && (
+                  <div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.4, color: "var(--ink-500)" }}>{opt.sub}</div>
+                )}
+              </div>
             </button>
           ))}
         </div>
@@ -348,6 +459,9 @@ function CustomizePanel({ questions, answers }) {
                   <span style={{ fontSize: 13.5, color: "var(--ink-900)", fontWeight: 500 }}>
                     {opt ? opt.label : <span style={{ color: "var(--ink-500)", fontWeight: 400, fontStyle: "italic" }}>Not answered</span>}
                   </span>
+                  {opt?.sub && (
+                    <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--ink-500)", lineHeight: 1.45 }}>{opt.sub}</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -366,6 +480,10 @@ function CustomizePanel({ questions, answers }) {
 
 const RO_NODE_W = 220;
 
+function roDecisionAnswerBlockH(a) {
+  return 26 + (String(a.rationale || '').trim() ? 14 : 0);
+}
+
 function roNodeHeight(node) {
   if (node.type === "DEFINITION") return 112;
   if (node.type === "PEOPLE") return 76;
@@ -373,7 +491,8 @@ function roNodeHeight(node) {
     const mats = Math.min((node.content?.materials || []).length, 4);
     return 82 + (node.content?.assignee ? 20 : 0) + mats * 20;
   }
-  return 78 + (node.answers || []).length * 28; // DECISION
+  const ans = node.answers || [];
+  return 78 + ans.reduce((s, a) => s + roDecisionAnswerBlockH(a), 0) + 4;
 }
 
 function roPortPos(node, portId) {
@@ -382,7 +501,13 @@ function roPortPos(node, portId) {
   if (portId === "in")  return { x, y: y + h / 2 };
   if (portId === "out") return { x: x + RO_NODE_W, y: y + h / 2 };
   const idx = (node.answers || []).findIndex((a) => a.id === portId);
-  if (idx >= 0) return { x: x + RO_NODE_W, y: y + 78 + idx * 28 + 14 };
+  if (idx >= 0) {
+    const answers = node.answers || [];
+    let acc = 78;
+    for (let k = 0; k < idx; k += 1) acc += roDecisionAnswerBlockH(answers[k]);
+    acc += roDecisionAnswerBlockH(answers[idx]) / 2;
+    return { x: x + RO_NODE_W, y: y + acc };
+  }
   return { x: x + RO_NODE_W, y: y + h / 2 };
 }
 
@@ -415,9 +540,16 @@ function ReadOnlyFlowNode({ node }) {
       <div style={{ padding: "7px 10px 9px" }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-900)", lineHeight: 1.35 }}>{label}</div>
         {node.type === "DECISION" && (node.answers || []).map((a, i) => (
-          <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "3px 0", fontSize: 11.5, color: "var(--ink-700)" }}>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: "var(--purple-700)", background: "var(--purple-100)", borderRadius: 3, padding: "1px 4px", flexShrink: 0, marginTop: 1, lineHeight: 1.4 }}>{i + 1}</span>
-            <span style={{ lineHeight: 1.4 }}>{a.text}</span>
+          <div key={a.id} style={{ padding: "2px 0 1px", fontSize: 11.5, color: "var(--ink-700)" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: "var(--purple-700)", background: "var(--purple-100)", borderRadius: 3, padding: "1px 4px", flexShrink: 0, marginTop: 1, lineHeight: 1.4 }}>{i + 1}</span>
+              <span style={{ lineHeight: 1.4 }}>{a.text}</span>
+            </div>
+            {String(a.rationale || "").trim() && (
+              <div style={{ paddingLeft: 22, marginTop: 2, fontSize: 10, lineHeight: 1.35, color: "var(--ink-500)", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                {a.rationale}
+              </div>
+            )}
           </div>
         ))}
         {node.type === "ACTION" && node.content?.assignee && (
@@ -638,12 +770,36 @@ function findAllTerminalPaths(nodes, edges) {
   const results = [];
   function traverse(node, cur, visited) {
     if (!node || visited.has(node.id)) return;
-    const nv = new Set(visited); nv.add(node.id);
-    if (node.type === "ACTION") { results.push({ actionNode: node, path: [...cur] }); return; }
-    for (const edge of edges.filter((e) => e.sourceNodeId === node.id)) {
-      const answer = (node.answers || []).find((a) => a.id === edge.sourceAnswerId);
+    const nv = new Set(visited);
+    nv.add(node.id);
+    const outs = edges.filter((e) => e.sourceNodeId === node.id);
+
+    if (node.type === "ACTION") {
+      if (!outs.length) {
+        results.push({ actionNode: node, path: [...cur] });
+        return;
+      }
+      for (const edge of outs) {
+        const next = nodeById[edge.targetNodeId];
+        if (next) traverse(next, cur, nv);
+      }
+      return;
+    }
+
+    if (node.type === "DECISION") {
+      for (const edge of outs) {
+        const answer = (node.answers || []).find((a) => a.id === edge.sourceAnswerId);
+        const next = nodeById[edge.targetNodeId];
+        if (next) {
+          traverse(next, [...cur, { decisionNode: node, answerId: edge.sourceAnswerId, answerText: answer?.text || "", question: node.content?.question || node.label }], nv);
+        }
+      }
+      return;
+    }
+
+    for (const edge of outs) {
       const next = nodeById[edge.targetNodeId];
-      if (next) traverse(next, [...cur, { decisionNode: node, answerId: edge.sourceAnswerId, answerText: answer?.text || "", question: node.content?.question || node.label }], nv);
+      if (next) traverse(next, cur, nv);
     }
   }
   traverse(rootNode, [], new Set());
@@ -826,7 +982,10 @@ function SigningFlowModal({ doc, onClose, onContact }) {
       return graphPath.map(({ node }) => ({
         id: node.id,
         title: node.content?.question || node.label,
-        options: (node.answers || []).map((a) => ({ value: a.id, label: a.text })),
+        options: (node.answers || []).map((a) => {
+          const rat = String(a.rationale || "").trim();
+          return { value: a.id, label: a.text, ...(rat ? { sub: rat } : {}) };
+        }),
       }));
     }
     return doc?.flow?.questions || [];

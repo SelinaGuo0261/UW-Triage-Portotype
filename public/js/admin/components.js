@@ -291,23 +291,52 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
         <div className="node-answers">
           {node.answers.map((a, i) => (
             <div key={a.id} className="node-answer">
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: 'var(--purple-700)', background: 'var(--purple-100)', borderRadius: 3, padding: '1px 4px', flexShrink: 0, lineHeight: 1.4 }}>{i + 1}</span>
-              <textarea className="answer-input" value={a.label} onChange={(e) => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, label: e.target.value } : x) })} onPointerDown={(e) => e.stopPropagation()} placeholder="Answer label" rows={1} />
-              <button className="answer-remove" onClick={() => onUpdate({ answers: node.answers.filter(x => x.id !== a.id) })}><Icon.X /></button>
+              <div className="node-answer-main">
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: 'var(--purple-700)', background: 'var(--purple-100)', borderRadius: 3, padding: '1px 4px', flexShrink: 0, lineHeight: 1.4 }}>{i + 1}</span>
+                <textarea className="answer-input" readOnly={readOnly} value={a.label} onChange={(e) => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, label: e.target.value } : x) })} onPointerDown={(e) => e.stopPropagation()} placeholder="Answer label" rows={1} />
+                {!readOnly && <button className="answer-remove" type="button" onClick={() => onUpdate({ answers: node.answers.filter(x => x.id !== a.id) })}><Icon.X /></button>}
+              </div>
+              {!readOnly && (
+                a.rationaleExpanded ? (
+                  <div className="answer-rationale-editor">
+                    <textarea
+                      className="answer-rationale-textarea"
+                      value={a.rationale || ''}
+                      onChange={(e) => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, rationale: e.target.value } : x) })}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      placeholder="判断依据：文档中如何界定该选项适用…"
+                      rows={3}
+                    />
+                    <button type="button" className="answer-rationale-collapse" onPointerDown={(e) => e.stopPropagation()} onClick={() => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, rationaleExpanded: false } : x) })}>收起</button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="answer-rationale-preview"
+                    title={(a.rationale || '').trim() ? (a.rationale.length > 200 ? `${(a.rationale || '').slice(0, 200)}…` : a.rationale) : ''}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, rationaleExpanded: true } : x) })}
+                  >
+                    {(a.rationale || '').trim() || '判断依据（点击展开编辑）…'}
+                  </button>
+                )
+              )}
+              {readOnly && (a.rationale || '').trim() && (
+                <div className="answer-rationale-preview readonly" title={a.rationale}>{a.rationale}</div>
+              )}
             </div>
           ))}
-          {!readOnly && <button className="node-add-answer" onClick={() => onUpdate({ answers: [...node.answers, { id: 'a' + Math.random(), label: 'New answer' }] })} onPointerDown={(e) => e.stopPropagation()}>
+          {!readOnly && <button className="node-add-answer" onClick={() => onUpdate({ answers: [...node.answers, { id: 'a' + Math.random(), label: 'New answer', rationale: '' }] })} onPointerDown={(e) => e.stopPropagation()}>
             <Icon.Plus /> Add answer
           </button>}
         </div>
       )}
-      {/* Answer ports — positioned relative to the .node div using the same formula as portPos,
-          so lines and dots are always perfectly co-located */}
+      {/* Answer ports — same vertical center as portPos() via decisionPortLocalCenterY */}
       {!readOnly && node.type === 'decision' && node.answers.map((a, i) => (
         <div
           key={`pt-${a.id}`}
           className={`port output ${isConnectedAsSource(a.id) ? 'connected' : ''} ${hoverPort?.node === node.id && hoverPort?.port === a.id ? 'hot' : ''}`}
-          style={{ right: '-7px', top: `${71 + i * 44 + 22}px`, transform: 'translateY(-50%)' }}
+          style={{ right: '-7px', top: `${decisionPortLocalCenterY(node, i)}px`, transform: 'translateY(-50%)' }}
           onPointerDown={(e) => onStartConn(e, node, a.id)}
           onPointerEnter={() => setHoverPort({ node: node.id, port: a.id })}
           onPointerLeave={() => setHoverPort(null)}
@@ -345,7 +374,7 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
       )}
 
       {node.type !== 'start' && <Port id="in" className="input" />}
-      {(node.type === 'start' || node.type === 'publish') && <Port id="out" className="output" />}
+      {(node.type === 'start' || node.type === 'publish' || node.type === 'action') && <Port id="out" className="output" />}
       {readOnly && <div style={{ position: 'absolute', inset: 0, zIndex: 50, borderRadius: 'inherit', cursor: 'default' }} />}
     </div>
   );
@@ -564,7 +593,6 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
 
   const startConn = (e, node, portId) => {
     if (readOnly) return;
-    if (node.type === 'action') return;   // ← ACTION 节点不能发出连接
     e.stopPropagation();
     const p = portPos(node, portId);
     setPendingConn({ fromNode: node.id, fromPort: portId, cursor: p });
@@ -624,7 +652,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     const cx = -pan.x / zoom + (wrapRef.current?.clientWidth || 800) / (2 * zoom) - NODE_W / 2;
     const cy = -pan.y / zoom + (wrapRef.current?.clientHeight || 600) / (2 * zoom) - 60;
     const base = { id: 'n' + Date.now(), x: cx, y: cy };
-    if (type === 'decision') setNodes(ns => [...ns, { ...base, type, title: 'New decision?', answers: [{ id: 'a' + Math.random(), label: 'Yes' }, { id: 'a' + Math.random(), label: 'No' }] }]);
+    if (type === 'decision') setNodes(ns => [...ns, { ...base, type, title: 'New decision?', answers: [{ id: 'a' + Math.random(), label: 'Yes', rationale: '' }, { id: 'a' + Math.random(), label: 'No', rationale: '' }] }]);
     else if (type === 'action') setNodes(ns => [...ns, { ...base, type, title: 'New action', description: 'Describe what happens here.', assignee: 'Unassigned', materials: [] }]);
     else if (type === 'publish') setNodes(ns => [...ns, { ...base, type, title: 'Publish to Portal' }]);
     else if (type === 'people') setNodes(ns => [...ns, { ...base, type, name: 'New Reviewer', role: 'Role', email: '', hiddenFromResearchers: true }]);
@@ -721,7 +749,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
             onPointerDown={(e) => onNodePointerDown(e, n)}
             onUpdate={(patch) => updateNode(n.id, patch)}
             onDelete={() => deleteNode(n.id)}
-            onDuplicate={() => { snapshot(); const copy = { ...n, id: 'n' + Date.now(), x: n.x + 40, y: n.y + 40, answers: n.answers?.map(a => ({ ...a, id: 'a' + Math.random() })) }; setNodes(ns => [...ns, copy]); toast('Node duplicated'); }}
+            onDuplicate={() => { snapshot(); const copy = { ...n, id: 'n' + Date.now(), x: n.x + 40, y: n.y + 40, answers: n.answers?.map(a => ({ ...a, id: 'a' + Math.random(), rationaleExpanded: false })) }; setNodes(ns => [...ns, copy]); toast('Node duplicated'); }}
             onStartConn={startConn}
             onFinishConn={finishConn}
             onOpenMenu={(e, nodeId) => { if (readOnly) return; e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, nodeId }); }}
@@ -869,7 +897,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
 
       {ctxMenu && (
         <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
-          <div className="ctx-item" onClick={() => { const n = nodes.find(x => x.id === ctxMenu.nodeId); if (n) { snapshot(); const copy = { ...n, id: 'n' + Date.now(), x: n.x + 40, y: n.y + 40, answers: n.answers?.map(a => ({ ...a, id: 'a' + Math.random() })) }; setNodes(ns => [...ns, copy]); } setCtxMenu(null); }}><Icon.Copy /> Duplicate <kbd>⌘D</kbd></div>
+          <div className="ctx-item" onClick={() => { const n = nodes.find(x => x.id === ctxMenu.nodeId); if (n) { snapshot(); const copy = { ...n, id: 'n' + Date.now(), x: n.x + 40, y: n.y + 40, answers: n.answers?.map(a => ({ ...a, id: 'a' + Math.random(), rationaleExpanded: false })) }; setNodes(ns => [...ns, copy]); } setCtxMenu(null); }}><Icon.Copy /> Duplicate <kbd>⌘D</kbd></div>
           <div className="ctx-item" onClick={() => setCtxMenu(null)}><Icon.Link /> Copy link</div>
           <div className="ctx-divider" />
           <div className="ctx-item danger" onClick={() => { deleteNode(ctxMenu.nodeId); setCtxMenu(null); }}><Icon.Trash /> Delete <kbd>⌫</kbd></div>
@@ -1057,10 +1085,12 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
     if (n.type === 'decision') {
       const updateAnswer = (aid, label) =>
         onUpdateNode(n.id, { answers: n.answers.map(a => a.id === aid ? { ...a, label } : a) });
+      const updateAnswerRationale = (aid, rationale) =>
+        onUpdateNode(n.id, { answers: n.answers.map(a => a.id === aid ? { ...a, rationale } : a) });
       const deleteAnswer = (aid) =>
         onUpdateNode(n.id, { answers: n.answers.filter(a => a.id !== aid) });
       const addAnswer = () =>
-        onUpdateNode(n.id, { answers: [...(n.answers || []), { id: 'a' + Math.random().toString(36).slice(2), label: 'New option' }] });
+        onUpdateNode(n.id, { answers: [...(n.answers || []), { id: 'a' + Math.random().toString(36).slice(2), label: 'New option', rationale: '' }] });
 
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1071,20 +1101,30 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
           <div className="inspect-section">
             <div className="rp-section-label">Branches · {n.answers?.length || 0}</div>
             {(n.answers || []).map((ans, i) => (
-              <div key={ans.id} className="inspect-answer-row">
-                <span className="inspect-answer-num">{i + 1}</span>
-                <input
-                  className="inspect-input"
-                  style={{ flex: 1 }}
-                  value={ans.label}
-                  onChange={(e) => updateAnswer(ans.id, e.target.value)}
+              <div key={ans.id} className="inspect-answer-block">
+                <div className="inspect-answer-row">
+                  <span className="inspect-answer-num">{i + 1}</span>
+                  <input
+                    className="inspect-input"
+                    style={{ flex: 1 }}
+                    value={ans.label}
+                    onChange={(e) => updateAnswer(ans.id, e.target.value)}
+                  />
+                  <button
+                    className="inspect-delete-btn"
+                    onClick={() => deleteAnswer(ans.id)}
+                    title="Delete branch"
+                    disabled={(n.answers?.length || 0) <= 1}
+                  >×</button>
+                </div>
+                <div className="inspect-sublabel">判断依据</div>
+                <textarea
+                  className="inspect-textarea inspect-rationale-ta"
+                  rows={2}
+                  value={ans.rationale || ''}
+                  onChange={(e) => updateAnswerRationale(ans.id, e.target.value)}
+                  placeholder="文档中如何界定该选项适用（画布节点上可单行预览、点击展开）"
                 />
-                <button
-                  className="inspect-delete-btn"
-                  onClick={() => deleteAnswer(ans.id)}
-                  title="Delete branch"
-                  disabled={(n.answers?.length || 0) <= 1}
-                >×</button>
               </div>
             ))}
             <button className="inspect-add-btn" onClick={addAnswer}>
@@ -1476,9 +1516,10 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
 
   const startAnalysis = async () => {
     const STEP_MS = 1500;
+    const TOAST_MS = 3000;
     const FETCH_TOAST_MS = 180000;
 
-    const pushStep = (msg, toastDuration = STEP_MS) => {
+    const pushStep = (msg, toastDuration = TOAST_MS) => {
       setAiProgress(msg);
       toast(msg, { duration: toastDuration });
     };
@@ -1534,7 +1575,7 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
       const message = error.message || 'AI analysis failed';
       setAnalysisError(message);
       setAiProgress(message);
-      toast(message, { duration: STEP_MS });
+      toast(message, { duration: TOAST_MS });
     } finally {
       setAnalyzing(false);
       setAiProgress('');

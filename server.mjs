@@ -12,9 +12,17 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 3100);
-/** Max completion tokens (output). Provider/model caps still apply; override with env. */
-const AI_MAX_OUTPUT_TOKENS_CLAUDE = Math.max(256, Number(process.env.AI_MAX_OUTPUT_TOKENS_CLAUDE) || Number(process.env.AI_MAX_OUTPUT_TOKENS) || 16384);
-const AI_MAX_OUTPUT_TOKENS_OPENAI = Math.max(256, Number(process.env.AI_MAX_OUTPUT_TOKENS_OPENAI) || Number(process.env.AI_MAX_OUTPUT_TOKENS) || 32768);
+/** Max completion tokens (output). No app-side floor; set env to cap. Provider still enforces model max. */
+function envOutputTokens(primaryEnv, fallbackDefault) {
+  const v = Number(process.env[primaryEnv]) || Number(process.env.AI_MAX_OUTPUT_TOKENS);
+  if (Number.isFinite(v) && v >= 1) return Math.floor(v);
+  return fallbackDefault;
+}
+const claude128kBetaOn =
+  process.env.CLAUDE_OUTPUT_128K_BETA !== '0' && process.env.CLAUDE_OUTPUT_128K_BETA !== 'false';
+// Defaults: large output for file→flow. Claude uses 128k-output beta when enabled (see callClaude).
+const AI_MAX_OUTPUT_TOKENS_CLAUDE = envOutputTokens('AI_MAX_OUTPUT_TOKENS_CLAUDE', claude128kBetaOn ? 128000 : 8192);
+const AI_MAX_OUTPUT_TOKENS_OPENAI = envOutputTokens('AI_MAX_OUTPUT_TOKENS_OPENAI', 262144);
 const SUPPORTED_AI_PROVIDERS = ['openai', 'claude', 'kimi'];
 let aiConfig = null;
 
@@ -128,13 +136,139 @@ function requireAiConfig() {
   return aiConfig;
 }
 
-function buildGraphPrompt(input) {
+/** Circled digits ①…⑳ often mark table rows in UW procedure DOCX; mammoth leaves them on their own line. */
+const CIRCLED_STEP_MARKS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+
+function nextNonEmptyLine(lines, startIndex) {
+  for (let j = startIndex; j < lines.length; j += 1) {
+    const t = lines[j].trim();
+    if (t) return { index: j, text: t };
+  }
+  return null;
+}
+
+/** Pull checklist rows like "①" then next line title — used to stop the model from merging long OSP/SAGE sequences. */
+function extractCircledStepInventory(sourceText) {
+  const lines = String(sourceText || '').replace(/\r\n/g, '\n').split('\n');
+  const skip = new Set(['步骤', '环节名称', '说明', '备注', '适用场景', '主管办公室', '注意事项']);
+  const steps = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (line.length !== 1 || !CIRCLED_STEP_MARKS.includes(line)) continue;
+    const next = nextNonEmptyLine(lines, i + 1);
+    if (!next || skip.has(next.text)) continue;
+    if (CIRCLED_STEP_MARKS.includes(next.text[0])) continue;
+    steps.push({ mark: line, title: next.text.slice(0, 240) });
+  }
+  return steps;
+}
+
+/** Optional pass-1: structure dossier for the graph LLM (segmentation, chain hints, branch↔late-section linkage). */
+function buildSourceTextAnalysisPrompt(input) {
+  const sourceText = String(input.sourceText || '');
+  const circledSteps = extractCircledStepInventory(sourceText);
+  const checklistHint = circledSteps.length
+    ? `\nParser also found circled step rows (for alignment with later graph stages):\n${circledSteps.map((s, idx) => `${idx + 1}. [${s.mark}] ${s.title}`).join('\n')}\n`
+    : '';
+  return `You are analyzing a long procedural document before another model builds a flowchart JSON.
+
+Perform ALL of the following on the SOURCE TEXT:
+1) Segmentation — split the document into segments (candidate "points" / stages). Each segment needs id, short title, summary, and roughLocation: "early"|"mid"|"late"|"whole".
+2) Chain completion — list candidatePoints with likelyKind DEFINITION|DECISION|ACTION|PEOPLE|UNKNOWN and predecessorId (another candidate id or null). Brief rationale each.
+3) Branch linkage & audit — documents often state "three cases" early, then describe case B's actions much later (not immediately after the fork). For each early fork, map each branch to later segment(s) that actually carry that branch's next steps. Then decisionOutgoingAudit: for every branch answer you infer, list documentSupportForNext: segments anywhere in the text that justify the next DECISION/ACTION (mappingConfidence high|medium|low). Flag gaps if prose for a branch seems missing.
+
+Return ONLY strict JSON (no markdown fence) with this shape:
+{
+  "segmentation": [{"id":"seg-1","title":"string","summary":"string","roughLocation":"early|mid|late|whole"}],
+  "candidatePoints": [{"id":"pt-1","title":"string","likelyKind":"DEFINITION|DECISION|ACTION|PEOPLE|UNKNOWN","predecessorId":null,"rationale":"string"}],
+  "earlyForks": [{
+    "summary":"string",
+    "branches": [{
+      "branchKey":"A",
+      "answerTextHint":"short label for a wizard answer",
+      "earlyEvidence":"string",
+      "laterLinkedSections":[{"segmentId":"seg-3","whyThisBelongsToThisBranch":"string"}],
+      "expectedNextKind":"ACTION|DECISION|PEOPLE",
+      "nextNodeContentHints":["string"]
+    }]
+  }],
+  "decisionOutgoingAudit": [{
+    "forkSummary":"string",
+    "branchKey":"string",
+    "answerTextHint":"string",
+    "documentSupportForNext":[{"segmentId":"string","snippet":"string","mappingConfidence":"high|medium|low"}],
+    "notes":"string"
+  }],
+  "graphBuilderBrief":"Concise instructions for the graph model: how to wire DECISION answers to ACTION nodes when supporting prose is non-adjacent; language may match the source document."
+}
+
+Flow name (context): ${input.name || ''}
+Source URL: ${input.sourceUrl || ''}
+Source file: ${input.sourceFile || ''}
+${checklistHint}
+SOURCE TEXT:
+${sourceText}`;
+}
+
+function formatPreprocessDossier(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const brief = String(obj.graphBuilderBrief || '').trim();
+  const forks = Array.isArray(obj.earlyForks) ? JSON.stringify(obj.earlyForks) : '';
+  const audit = Array.isArray(obj.decisionOutgoingAudit) ? JSON.stringify(obj.decisionOutgoingAudit) : '';
+  const seg = Array.isArray(obj.segmentation) ? JSON.stringify(obj.segmentation) : '';
+  const chain = Array.isArray(obj.candidatePoints) ? JSON.stringify(obj.candidatePoints) : '';
+  const parts = [];
+  if (brief) parts.push('## graphBuilderBrief\n' + brief);
+  if (seg) parts.push('## segmentation (JSON)\n' + seg.slice(0, 4500));
+  if (chain) parts.push('## candidatePoints (JSON)\n' + chain.slice(0, 4500));
+  if (forks) parts.push('## earlyForks (JSON)\n' + forks.slice(0, 5500));
+  if (audit) parts.push('## decisionOutgoingAudit (JSON)\n' + audit.slice(0, 4500));
+  return parts.join('\n\n').slice(0, 14000);
+}
+
+async function analyzeSourceTextStructure(input, config) {
+  const sourceText = String(input.sourceText || '').trim();
+  if (sourceText.length < 64) return null;
+  const prompt = buildSourceTextAnalysisPrompt(input);
+  const text = await callAi(prompt, config);
+  let jsonText = extractJsonCandidate(text);
+  try {
+    return JSON.parse(jsonText);
+  } catch (e) {
+    try {
+      const repaired = await repairJsonWithAi(
+        jsonText,
+        e.message,
+        config,
+        'a SOURCE STRUCTURE analysis dossier (segmentation, candidatePoints, earlyForks, decisionOutgoingAudit, graphBuilderBrief)'
+      );
+      jsonText = extractJsonCandidate(repaired);
+      return JSON.parse(jsonText);
+    } catch {
+      try {
+        return JSON.parse(repairCommonJsonIssues(jsonText));
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+
+function buildGraphPrompt(input, preprocessDossier = '') {
+  const sourceText = String(input.sourceText || '');
+  const circledSteps = extractCircledStepInventory(sourceText);
+  const checklistBlock = circledSteps.length
+    ? `\n---\nMandatory checklist (parser found these rows in the text — you MUST implement every line as its own graph stage on the branch that matches the document, e.g. the OSP/SAGE sponsored-research path for ①–⑧ below; do not skip or merge rows):\n${circledSteps.map((s, idx) => `${idx + 1}. [${s.mark}] ${s.title}`).join('\n')}\n`
+    : '';
+  const dossierBlock = preprocessDossier
+    ? `\n---\nStructured document analysis (use this when wiring branches; supporting prose for a branch may appear far from where the fork is introduced — attach each DECISION answer edge to the ACTION/DECISION justified anywhere in the text, not only text adjacent to the question):\n${preprocessDossier}\n`
+    : '';
   return `Return only strict JSON for a UW agreement triage graph with nodes and edges. Use this schema:
 {
   "flowName": string,
   "description": string,
   "nodes": [
-    {"tempId": string, "type": "DEFINITION|DECISION|ACTION|PEOPLE", "label": string, "content": object, "answers": [{"tempId": string, "text": string, "order": number}]}
+    {"tempId": string, "type": "DEFINITION|DECISION|ACTION|PEOPLE", "label": string, "content": object, "answers": [{"tempId": string, "text": string, "order": number, "rationale": string}]}
   ],
   "edges": [{"sourceNodeTempId": string, "sourceAnswerTempId": string|null, "targetNodeTempId": string}]
 }
@@ -143,19 +277,22 @@ Rules:
 - DEFINITION content must include description, relatedOffices, templates, and resources
 - DEFINITION has exactly one outgoing edge to the next node (DECISION, ACTION, or PEOPLE as appropriate). A flow may have zero DECISION nodes if the process is linear or single-outcome.
 - If you include DECISION nodes, each DECISION answer must have an outgoing edge
-- ACTION nodes are terminal and must not have outgoing edges
+- ACTION nodes may have **0 or 1** outgoing edge only. Use sourceAnswerTempId null on that edge (same convention as from DEFINITION). 0 = terminal outcome for that path; 1 = continue to the next ACTION, DECISION, or PEOPLE. Never attach more than one outgoing edge from the same ACTION.
+- DECISION nodes represent branching: use **two or more answers** when the source document has a real fork; a **single-answer** DECISION is allowed only for linear "continue" steps. Each answer must have exactly one outgoing edge. Allowed flows include ACTION→ACTION, ACTION→DECISION, DECISION→ACTION, and DECISION→DECISION.
+- For each DECISION answer, include **"rationale"**: a short sentence (判断依据) citing how the document supports choosing that branch; use empty string "" if none.
 - ACTION content must include title, description, assigneeKind, assignee, and materials
 - ACTION content.materials must be a JSON array (possibly empty) of objects like {"label":"..."}; never a single object or string at the top level
 - materials attachKind must be null and attachValue must be empty
 - Include at least one ACTION result.
-- Preserve the source material: when the text lists numbered steps, phases, checkpoints, or a clear sequence, reflect those as separate DECISION and/or ACTION nodes (and edges) so the flow matches the document; do not merge distinct steps into fewer nodes unless the source clearly treats them as one step. Use DECISION only where branching is needed.
+- DECISION nodes must set content.question (string) for the end-user wizard; keep node.label aligned with that question when possible.
+- Linear procedures: chain ACTION→ACTION or ACTION→DECISION with at most one edge per ACTION; use multi-answer DECISION only for branches (typically 2+ options). For circled/numbered step lists, prefer explicit stages rather than merging unrelated steps into one node.
 - Use double-quoted JSON keys and string values only. No comments. No trailing commas.
 
 Flow name: ${input.name || ''}
 Source URL: ${input.sourceUrl || ''}
 Source file: ${input.sourceFile || ''}
 Text:
-${String(input.sourceText || '')}`;
+${sourceText}${checklistBlock}${dossierBlock}`;
 }
 
 function extractJsonCandidate(text) {
@@ -168,16 +305,21 @@ function extractJsonCandidate(text) {
 }
 
 async function callClaude(prompt, config) {
+  const maxTokens = AI_MAX_OUTPUT_TOKENS_CLAUDE;
+  const headers = {
+    'content-type': 'application/json',
+    'x-api-key': config.apiKey,
+    'anthropic-version': '2023-06-01',
+  };
+  if (claude128kBetaOn && maxTokens > 8192) {
+    headers['anthropic-beta'] = 'output-128k-2025-02-19';
+  }
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
-    },
+    headers,
     body: JSON.stringify({
       model: config.model,
-      max_tokens: AI_MAX_OUTPUT_TOKENS_CLAUDE,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -362,7 +504,16 @@ function generateFallbackGraph({ name, sourceFile, sourceText }) {
 
 async function generateGraph(input) {
   const config = requireAiConfig();
-  const prompt = buildGraphPrompt(input);
+  let preprocessDossier = '';
+  if (process.env.AI_SKIP_SOURCE_PREPROCESS !== '1') {
+    try {
+      const dossierObj = await analyzeSourceTextStructure(input, config);
+      preprocessDossier = formatPreprocessDossier(dossierObj);
+    } catch (e) {
+      console.warn('[source preprocess]', e?.message || e);
+    }
+  }
+  const prompt = buildGraphPrompt(input, preprocessDossier);
   const text = await callAi(prompt, config);
   let jsonText = extractJsonCandidate(text);
   let parsed;
@@ -370,7 +521,7 @@ async function generateGraph(input) {
     parsed = JSON.parse(jsonText);
   } catch (error) {
     try {
-      const repaired = await repairJsonWithAi(jsonText, error.message, config);
+      const repaired = await repairJsonWithAi(jsonText, error.message, config, 'a UW agreement triage graph');
       jsonText = extractJsonCandidate(repaired);
       parsed = JSON.parse(jsonText);
     } catch (repairError) {
@@ -384,8 +535,8 @@ async function generateGraph(input) {
   return normalizeAiGraph(parsed, input);
 }
 
-async function repairJsonWithAi(badJson, parseError, config) {
-  const repairPrompt = `Fix this malformed JSON for a UW agreement triage graph.
+async function repairJsonWithAi(badJson, parseError, config, schemaHint = 'a UW agreement triage graph') {
+  const repairPrompt = `Fix this malformed JSON for ${schemaHint}.
 
 Return ONLY valid strict JSON. No markdown, no comments, no explanation.
 Keep the same schema and intent. Do not add trailing commas.
@@ -442,11 +593,18 @@ function normalizeAiGraph(raw, input) {
       const answerId = id('ans');
       const answerRef = a.tempId || a.id || a.answerId || a.text || `${nodeRef}-a${order}`;
       [answerRef, a.id, a.tempId, a.answerId].filter(Boolean).forEach((key) => answerIdByTemp.set(key, answerId));
-      return { id: answerId, text: String(a.text || `Answer ${order + 1}`), order: Number.isFinite(a.order) ? a.order : order };
+      const ratRaw = a.rationale ?? a.basis ?? a.criteria ?? '';
+      const rat = String(ratRaw || '').trim();
+      const row = { id: answerId, text: String(a.text || `Answer ${order + 1}`), order: Number.isFinite(a.order) ? a.order : order };
+      if (rat) row.rationale = rat;
+      return row;
     });
     const content = n.content && typeof n.content === 'object' ? { ...n.content } : {};
     if (type === NodeType.ACTION) {
       content.materials = normalizeActionMaterialsForNode(content.materials);
+    }
+    if (type === NodeType.DECISION && !content.question) {
+      content.question = String(n.label || n.content?.title || 'Next step');
     }
     return {
       id: nodeId,
@@ -517,11 +675,14 @@ function validateFlow(flow) {
     if (![NodeType.DEFINITION, NodeType.PEOPLE].includes(node.type) && incoming.length === 0 && outgoing.length === 0) {
       errors.push(`${node.label} is isolated.`);
     }
-    if (node.type === NodeType.ACTION && outgoing.length > 0) {
-      errors.push(`${node.label} is an ACTION node and cannot have outgoing edges.`);
+    if (node.type === NodeType.ACTION && outgoing.length > 1) {
+      errors.push(`${node.label}: ACTION may have at most one outgoing edge (found ${outgoing.length}).`);
     }
     if (node.type === NodeType.ACTION && !node.content?.assignee) {
       warnings.push(`${node.label} has no assignee.`);
+    }
+    if (node.type === NodeType.DECISION && (node.answers || []).length >= 2 && outgoing.length < 2) {
+      warnings.push(`${node.label}: DECISION has multiple answers but fewer than two outgoing edges; check wiring.`);
     }
     if (node.type === NodeType.DECISION) {
       for (const answer of node.answers || []) {

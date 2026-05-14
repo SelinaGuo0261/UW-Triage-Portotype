@@ -26,9 +26,9 @@ function App() {
   const sidebarDragWidthRef = useRef(null);
   const toastTimerRef = useRef(null);
 
-  const TOAST_DEFAULT_MS = 1500;
+  const TOAST_DEFAULT_MS = 3000;
 
-  /** Replaces any existing toast. Each toast stays at least `duration` ms (default 1500) unless replaced sooner. */
+  /** Replaces any existing toast. Each toast stays at least `duration` ms (default 3000) unless replaced sooner. */
   const pushToast = useCallback((text, opts = {}) => {
     const duration = opts.duration !== undefined ? opts.duration : TOAST_DEFAULT_MS;
     if (toastTimerRef.current) {

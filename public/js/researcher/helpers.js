@@ -283,7 +283,10 @@ function snapshotToDoc(snapshot) {
       questions: decisions.map((node) => ({
         id: node.id,
         title: node.content?.question || node.label,
-        options: (node.answers || []).map((answer) => ({ value: answer.id, label: answer.text })),
+        options: (node.answers || []).map((answer) => {
+          const rat = String(answer.rationale || "").trim();
+          return { value: answer.id, label: answer.text, ...(rat ? { sub: rat } : {}) };
+        }),
       })),
       compute(answers) {
         // 保持原有 compute 不变，供 static DOC_TYPES 的 CustomizePanel 使用
@@ -300,7 +303,11 @@ function snapshotToDoc(snapshot) {
               action: current.content?.title || current.label,
               materials: (current.content?.materials || []).map((material) => material.label),
             });
-            break;
+            const nextEdge = edges.find((edge) => edge.sourceNodeId === current.id && (edge.sourceAnswerId == null || edge.sourceAnswerId === ""))
+              || edges.find((edge) => edge.sourceNodeId === current.id);
+            if (!nextEdge) break;
+            current = nodeById[nextEdge.targetNodeId];
+            continue;
           }
           if (current.type !== "DECISION") break;
           const selected = answers[current.id] || current.answers?.[0]?.id;
