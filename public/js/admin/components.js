@@ -1476,9 +1476,10 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
 
   const startAnalysis = async () => {
     const STEP_MS = 1500;
+    const TOAST_MS = 3000;
     const FETCH_TOAST_MS = 180000;
 
-    const pushStep = (msg, toastDuration = STEP_MS) => {
+    const pushStep = (msg, toastDuration = TOAST_MS) => {
       setAiProgress(msg);
       toast(msg, { duration: toastDuration });
     };
@@ -1534,7 +1535,7 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
       const message = error.message || 'AI analysis failed';
       setAnalysisError(message);
       setAiProgress(message);
-      toast(message, { duration: STEP_MS });
+      toast(message, { duration: TOAST_MS });
     } finally {
       setAnalyzing(false);
       setAiProgress('');

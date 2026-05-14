@@ -12,9 +12,17 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 3100);
-/** Max completion tokens (output). Provider/model caps still apply; override with env. */
-const AI_MAX_OUTPUT_TOKENS_CLAUDE = Math.max(256, Number(process.env.AI_MAX_OUTPUT_TOKENS_CLAUDE) || Number(process.env.AI_MAX_OUTPUT_TOKENS) || 16384);
-const AI_MAX_OUTPUT_TOKENS_OPENAI = Math.max(256, Number(process.env.AI_MAX_OUTPUT_TOKENS_OPENAI) || Number(process.env.AI_MAX_OUTPUT_TOKENS) || 32768);
+/** Max completion tokens (output). No app-side floor; set env to cap. Provider still enforces model max. */
+function envOutputTokens(primaryEnv, fallbackDefault) {
+  const v = Number(process.env[primaryEnv]) || Number(process.env.AI_MAX_OUTPUT_TOKENS);
+  if (Number.isFinite(v) && v >= 1) return Math.floor(v);
+  return fallbackDefault;
+}
+const claude128kBetaOn =
+  process.env.CLAUDE_OUTPUT_128K_BETA !== '0' && process.env.CLAUDE_OUTPUT_128K_BETA !== 'false';
+// Defaults: large output for file→flow. Claude uses 128k-output beta when enabled (see callClaude).
+const AI_MAX_OUTPUT_TOKENS_CLAUDE = envOutputTokens('AI_MAX_OUTPUT_TOKENS_CLAUDE', claude128kBetaOn ? 128000 : 8192);
+const AI_MAX_OUTPUT_TOKENS_OPENAI = envOutputTokens('AI_MAX_OUTPUT_TOKENS_OPENAI', 262144);
 const SUPPORTED_AI_PROVIDERS = ['openai', 'claude', 'kimi'];
 let aiConfig = null;
 
@@ -128,7 +136,39 @@ function requireAiConfig() {
   return aiConfig;
 }
 
+/** Circled digits ①…⑳ often mark table rows in UW procedure DOCX; mammoth leaves them on their own line. */
+const CIRCLED_STEP_MARKS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+
+function nextNonEmptyLine(lines, startIndex) {
+  for (let j = startIndex; j < lines.length; j += 1) {
+    const t = lines[j].trim();
+    if (t) return { index: j, text: t };
+  }
+  return null;
+}
+
+/** Pull checklist rows like "①" then next line title — used to stop the model from merging long OSP/SAGE sequences. */
+function extractCircledStepInventory(sourceText) {
+  const lines = String(sourceText || '').replace(/\r\n/g, '\n').split('\n');
+  const skip = new Set(['步骤', '环节名称', '说明', '备注', '适用场景', '主管办公室', '注意事项']);
+  const steps = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (line.length !== 1 || !CIRCLED_STEP_MARKS.includes(line)) continue;
+    const next = nextNonEmptyLine(lines, i + 1);
+    if (!next || skip.has(next.text)) continue;
+    if (CIRCLED_STEP_MARKS.includes(next.text[0])) continue;
+    steps.push({ mark: line, title: next.text.slice(0, 240) });
+  }
+  return steps;
+}
+
 function buildGraphPrompt(input) {
+  const sourceText = String(input.sourceText || '');
+  const circledSteps = extractCircledStepInventory(sourceText);
+  const checklistBlock = circledSteps.length
+    ? `\n---\nMandatory checklist (parser found these rows in the text — you MUST implement every line as its own graph stage on the branch that matches the document, e.g. the OSP/SAGE sponsored-research path for ①–⑧ below; do not skip or merge rows):\n${circledSteps.map((s, idx) => `${idx + 1}. [${s.mark}] ${s.title}`).join('\n')}\n`
+    : '';
   return `Return only strict JSON for a UW agreement triage graph with nodes and edges. Use this schema:
 {
   "flowName": string,
@@ -148,14 +188,15 @@ Rules:
 - ACTION content.materials must be a JSON array (possibly empty) of objects like {"label":"..."}; never a single object or string at the top level
 - materials attachKind must be null and attachValue must be empty
 - Include at least one ACTION result.
-- Preserve the source material: when the text lists numbered steps, phases, checkpoints, or a clear sequence, reflect those as separate DECISION and/or ACTION nodes (and edges) so the flow matches the document; do not merge distinct steps into fewer nodes unless the source clearly treats them as one step. Use DECISION only where branching is needed.
+- DECISION nodes must set content.question (string) for the end-user wizard; keep node.label aligned with that question when possible.
+- Linear procedures: because ACTION cannot chain to the next step, represent each distinct numbered/circled/table row step as its own DECISION with exactly one answer (e.g. "下一环节" / "Continue") and content.question summarizing that step; chain DECISION→DECISION along that route, then use ACTION for true terminal outcomes (e.g. final signatory) where the source names an office or assignee. For real forks (multiple choices), use DECISION with multiple answers. Do not collapse multiple checklist steps into one ACTION or one DECISION.
 - Use double-quoted JSON keys and string values only. No comments. No trailing commas.
 
 Flow name: ${input.name || ''}
 Source URL: ${input.sourceUrl || ''}
 Source file: ${input.sourceFile || ''}
 Text:
-${String(input.sourceText || '')}`;
+${sourceText}${checklistBlock}`;
 }
 
 function extractJsonCandidate(text) {
@@ -168,16 +209,21 @@ function extractJsonCandidate(text) {
 }
 
 async function callClaude(prompt, config) {
+  const maxTokens = AI_MAX_OUTPUT_TOKENS_CLAUDE;
+  const headers = {
+    'content-type': 'application/json',
+    'x-api-key': config.apiKey,
+    'anthropic-version': '2023-06-01',
+  };
+  if (claude128kBetaOn && maxTokens > 8192) {
+    headers['anthropic-beta'] = 'output-128k-2025-02-19';
+  }
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
-    },
+    headers,
     body: JSON.stringify({
       model: config.model,
-      max_tokens: AI_MAX_OUTPUT_TOKENS_CLAUDE,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -447,6 +493,9 @@ function normalizeAiGraph(raw, input) {
     const content = n.content && typeof n.content === 'object' ? { ...n.content } : {};
     if (type === NodeType.ACTION) {
       content.materials = normalizeActionMaterialsForNode(content.materials);
+    }
+    if (type === NodeType.DECISION && !content.question) {
+      content.question = String(n.label || n.content?.title || 'Next step');
     }
     return {
       id: nodeId,
