@@ -128,7 +128,7 @@ Node {
   label, content, posX, posY, isDeletable, answers: Answer[]
 }
 
-Answer { id, text, order }
+Answer { id, text, order, rationale? }
 
 Edge { id, sourceNodeId, sourceAnswerId, targetNodeId, isDeletable }
 
@@ -141,12 +141,18 @@ PublishedSnapshot {
 
 The edge from a DEFINITION node to the first DECISION node has `sourceAnswerId` set to a non-null answer ID (not null) in some flows. `findAllTerminalPaths` must use `edges.find(e => e.sourceNodeId === definition?.id)` (no `!e.sourceAnswerId` filter) to find the root edge correctly.
 
+### ACTION vs DECISION out-degree (validateFlow)
+
+- **ACTION**: **0 or 1** outgoing edge (`sourceAnswerId` null when the edge exists). Allowed next types include ACTION, DECISION, PEOPLE.
+- **DECISION**: branching uses **2+ answers** when the document forks; **1 answer** is allowed for linear “continue” gates. Each answer must have its own outgoing edge. `validateFlow` warns if a DECISION has 2+ answers but fewer than two outgoing edges from that node (wiring smell).
+
 ## AI JSON Handling
 
 `POST /api/flows` calls the configured AI provider to generate graph JSON.
 
 Current server behavior:
 
+- optional **source-structure preprocess** LLM pass (`analyzeSourceTextStructure` → dossier injected into `buildGraphPrompt`) for segmentation, predecessor hints, and branch↔late-section linkage; set **`AI_SKIP_SOURCE_PREPROCESS=1`** to skip (one fewer API call)
 - compact graph prompt: max 8 nodes, max 4 answers per decision, max 3 materials per action
 - OpenAI JSON mode when provider is `openai`
 - Claude/OpenAI/Kimi provider paths
@@ -340,7 +346,7 @@ DECISION: 78 + answers.length * 28
 
 ### Tabs
 
-`findAllTerminalPaths(nodes, edges)` does DFS from the root DECISION node, collecting one result per ACTION node reached. Each tab = one terminal path. Tab label is built from path answers (`shortAnswerLabel`): text before first colon, or first 1-2 words per step, joined with " — ".
+`findAllTerminalPaths(nodes, edges)` does DFS from the node DEFINITION points to, collecting one result per **terminal** ACTION (ACTION with no outgoing edges). ACTION nodes with outgoing edges are traversed through. Each tab = one terminal path. Tab label is built from path answers (`shortAnswerLabel`): text before first colon, or first 1-2 words per step, joined with " — ".
 
 ### Swimlane
 

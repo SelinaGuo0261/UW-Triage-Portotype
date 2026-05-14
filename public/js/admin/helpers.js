@@ -270,7 +270,11 @@ function backendFlowToBuilderGraph(flow) {
         ...base,
         type: 'decision',
         title: node.content?.question || node.label || 'Decision',
-        answers: (node.answers || []).map((answer) => ({ id: answer.id, label: answer.text })),
+        answers: (node.answers || []).map((answer) => ({
+          id: answer.id,
+          label: answer.text,
+          rationale: answer.rationale != null ? String(answer.rationale) : '',
+        })),
       };
     }
     if (node.type === 'ACTION') {
@@ -386,7 +390,12 @@ function builderGraphToBackendFlow(currentFlow, nodes, edges) {
           posX: node.x,
           posY: node.y,
           isDeletable: true,
-          answers: (node.answers || []).map((answer, order) => ({ id: answer.id, text: answer.label, order })),
+          answers: (node.answers || []).map((answer, order) => {
+            const row = { id: answer.id, text: answer.label, order };
+            const rat = String(answer.rationale || '').trim();
+            if (rat) row.rationale = rat;
+            return row;
+          }),
         };
       }
       if (node.type === 'people') {
@@ -438,12 +447,31 @@ function builderGraphToBackendFlow(currentFlow, nodes, edges) {
   };
 }
 
+/** One DECISION branch row: label (44px) + one-line rationale preview (18px), optional expanded rationale editor (+72px). */
+function decisionSegmentHeight(answer) {
+  const base = 62;
+  const extra = answer && answer.rationaleExpanded ? 72 : 0;
+  return base + extra;
+}
+
+/** Vertical center of the label row’s output port (matches NodeView `.node-answer-main`). */
+function decisionPortLocalCenterY(node, idx) {
+  const answers = node.answers || [];
+  let y = 71;
+  for (let k = 0; k < idx; k += 1) y += decisionSegmentHeight(answers[k]);
+  return y + 22;
+}
+
 const nodeHeight = (node) => {
   if (node.type === 'start') return 72;
   if (node.type === 'definition') return 300;
   if (node.type === 'action') { const m = ensureMaterialsArray(node.materials).length; return 104 + (node.assignee ? 32 : 0) + 28 + m * 28 + 26; }
   if (node.type === 'publish') return 80;
   if (node.type === 'people') return node.email ? 104 : 86;
+  if (node.type === 'decision') {
+    const sum = (node.answers || []).reduce((s, a) => s + decisionSegmentHeight(a), 0);
+    return 71 + sum + 30;
+  }
   return 72 + (node.answers?.length || 0) * 44 + 30;
 };
 
@@ -461,8 +489,7 @@ const portPos = (node, portId) => {
   }
   const idx = node.answers?.findIndex(a => a.id === portId);
   if (idx < 0) return { x: node.x + NODE_W, y: node.y + h / 2 };
-  const answerTop = 71; // node-head (~37px) + node-title (~34px)
-  return { x: node.x + NODE_W, y: node.y + answerTop + idx * 44 + 22 };
+  return { x: node.x + NODE_W, y: node.y + decisionPortLocalCenterY(node, idx) };
 };
 
 const bezier = (a, b) => {
