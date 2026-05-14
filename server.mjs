@@ -12,6 +12,9 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 3100);
+/** Max completion tokens (output). Provider/model caps still apply; override with env. */
+const AI_MAX_OUTPUT_TOKENS_CLAUDE = Math.max(256, Number(process.env.AI_MAX_OUTPUT_TOKENS_CLAUDE) || Number(process.env.AI_MAX_OUTPUT_TOKENS) || 16384);
+const AI_MAX_OUTPUT_TOKENS_OPENAI = Math.max(256, Number(process.env.AI_MAX_OUTPUT_TOKENS_OPENAI) || Number(process.env.AI_MAX_OUTPUT_TOKENS) || 32768);
 const SUPPORTED_AI_PROVIDERS = ['openai', 'claude', 'kimi'];
 let aiConfig = null;
 
@@ -138,20 +141,21 @@ function buildGraphPrompt(input) {
 Rules:
 - exactly one DEFINITION node
 - DEFINITION content must include description, relatedOffices, templates, and resources
-- DEFINITION has one edge to the first DECISION
-- DECISION answers must each have an outgoing edge
+- DEFINITION has exactly one outgoing edge to the next node (DECISION, ACTION, or PEOPLE as appropriate). A flow may have zero DECISION nodes if the process is linear or single-outcome.
+- If you include DECISION nodes, each DECISION answer must have an outgoing edge
 - ACTION nodes are terminal and must not have outgoing edges
 - ACTION content must include title, description, assigneeKind, assignee, and materials
+- ACTION content.materials must be a JSON array (possibly empty) of objects like {"label":"..."}; never a single object or string at the top level
 - materials attachKind must be null and attachValue must be empty
 - Include at least one ACTION result.
-- Keep the graph compact: no more than 8 nodes total, no more than 4 answers per DECISION, no more than 3 materials per ACTION.
+- Preserve the source material: when the text lists numbered steps, phases, checkpoints, or a clear sequence, reflect those as separate DECISION and/or ACTION nodes (and edges) so the flow matches the document; do not merge distinct steps into fewer nodes unless the source clearly treats them as one step. Use DECISION only where branching is needed.
 - Use double-quoted JSON keys and string values only. No comments. No trailing commas.
 
 Flow name: ${input.name || ''}
 Source URL: ${input.sourceUrl || ''}
 Source file: ${input.sourceFile || ''}
 Text:
-${String(input.sourceText || '').slice(0, 18000)}`;
+${String(input.sourceText || '')}`;
 }
 
 function extractJsonCandidate(text) {
@@ -173,7 +177,7 @@ async function callClaude(prompt, config) {
     },
     body: JSON.stringify({
       model: config.model,
-      max_tokens: 3500,
+      max_tokens: AI_MAX_OUTPUT_TOKENS_CLAUDE,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -186,6 +190,7 @@ async function callOpenAICompatible(prompt, config, baseURL = 'https://api.opena
   const body = {
     model: config.model,
     temperature: 0,
+    max_tokens: AI_MAX_OUTPUT_TOKENS_OPENAI,
     messages: [{ role: 'user', content: prompt }],
   };
   if (config.provider === 'openai') {
@@ -389,7 +394,7 @@ Parse error:
 ${parseError}
 
 Malformed JSON:
-${String(badJson || '').slice(0, 24000)}`;
+${String(badJson || '')}`;
 
   return callAi(repairPrompt, config);
 }
@@ -404,6 +409,21 @@ function repairCommonJsonIssues(text) {
   fixed = fixed.replace(/]\s*\n\s*"/g, '],\n"');
   fixed = fixed.replace(/(true|false|null|\d)\s*\n\s*"/g, '$1,\n"');
   return fixed;
+}
+
+/** AI may return `materials` as one object, a string, or null — never assume it is an array. */
+function normalizeActionMaterialsForNode(materials) {
+  let list = [];
+  if (materials == null) list = [];
+  else if (Array.isArray(materials)) list = materials;
+  else if (typeof materials === 'object') list = [materials];
+  else if (typeof materials === 'string' && materials.trim()) list = [{ label: materials.trim() }];
+  return list.map((mat, i) => ({
+    id: mat && mat.id ? String(mat.id) : id('mat'),
+    label: String((mat && (mat.label ?? mat.name)) || `Material ${i + 1}`),
+    attachKind: mat && mat.attachKind != null ? mat.attachKind : null,
+    attachValue: mat && mat.attachValue != null ? String(mat.attachValue) : '',
+  }));
 }
 
 function normalizeAiGraph(raw, input) {
@@ -424,11 +444,15 @@ function normalizeAiGraph(raw, input) {
       [answerRef, a.id, a.tempId, a.answerId].filter(Boolean).forEach((key) => answerIdByTemp.set(key, answerId));
       return { id: answerId, text: String(a.text || `Answer ${order + 1}`), order: Number.isFinite(a.order) ? a.order : order };
     });
+    const content = n.content && typeof n.content === 'object' ? { ...n.content } : {};
+    if (type === NodeType.ACTION) {
+      content.materials = normalizeActionMaterialsForNode(content.materials);
+    }
     return {
       id: nodeId,
       type,
       label: String(n.label || n.content?.title || n.content?.question || type),
-      content: n.content && typeof n.content === 'object' ? n.content : {},
+      content,
       posX: type === NodeType.DEFINITION ? 0 : 340 + (index % 3) * 360,
       posY: type === NodeType.DEFINITION ? 0 : Math.floor(index / 3) * 220 + 40,
       isDeletable: type !== NodeType.DEFINITION,
@@ -451,9 +475,6 @@ function normalizeAiGraph(raw, input) {
   }).filter((e) => e.sourceNodeId && e.targetNodeId);
   if (!nodes.some((n) => n.type === NodeType.DEFINITION)) {
     throw new Error('AI response did not include a DEFINITION node.');
-  }
-  if (!nodes.some((n) => n.type === NodeType.DECISION)) {
-    throw new Error('AI response did not include a DECISION node.');
   }
   if (!nodes.some((n) => n.type === NodeType.ACTION)) {
     throw new Error('AI response did not include an ACTION node.');
@@ -482,9 +503,11 @@ function validateFlow(flow) {
     const defOut = edges.filter((e) => e.sourceNodeId === definition.id);
     const defIn = edges.filter((e) => e.targetNodeId === definition.id);
     if (defIn.length) errors.push('DEFINITION node cannot have incoming edges.');
-    if (defOut.length !== 1) errors.push('DEFINITION node must have exactly one outgoing edge to the root DECISION.');
-    if (defOut[0] && nodeById.get(defOut[0].targetNodeId)?.type !== NodeType.DECISION) {
-      errors.push('DEFINITION outgoing edge must target a DECISION node.');
+    if (defOut.length !== 1) errors.push('DEFINITION node must have exactly one outgoing edge.');
+    if (defOut[0]) {
+      const tgtType = nodeById.get(defOut[0].targetNodeId)?.type;
+      if (!tgtType) errors.push('DEFINITION outgoing edge must target a valid node.');
+      else if (tgtType === NodeType.DEFINITION) errors.push('DEFINITION cannot point to another DEFINITION.');
     }
   }
 
@@ -512,14 +535,8 @@ function validateFlow(flow) {
     }
   }
 
-  const rootDecisions = decisionNodes.filter((n) => {
-    const incoming = edges.filter((e) => e.targetNodeId === n.id);
-    return incoming.length === 1 && definition && incoming[0].sourceNodeId === definition.id;
-  });
-  if (rootDecisions.length !== 1) errors.push('Exactly one root DECISION must be reached from DEFINITION.');
-
   if (!actionNodes.length) errors.push('At least one ACTION node is required.');
-  if (!isAnyActionReachable(flow)) errors.push('No ACTION node is reachable from the root decision.');
+  if (!isAnyActionReachable(flow)) errors.push('No ACTION node is reachable from DEFINITION (follow edges from the node DEFINITION points to).');
 
   return { errors, warnings };
 }

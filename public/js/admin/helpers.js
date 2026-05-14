@@ -204,6 +204,47 @@ const SEED_EDGES = [];
 const NODE_W = 240;
 const API_BASE = '/api';
 
+/**
+ * Plain text from an uploaded file for AI / POST /api/flows.
+ * .docx is a ZIP of XML — never use File.text() on it (that sends binary garbage to the model).
+ */
+async function extractUploadTextForAi(file) {
+  if (!file) return '';
+  const name = (file.name || '').toLowerCase();
+  if (name.endsWith('.txt')) return file.text();
+  if (name.endsWith('.docx')) {
+    if (typeof mammoth === 'undefined') {
+      throw new Error('DOCX reader failed to load (mammoth). Check network, refresh the page, or paste text in Description.');
+    }
+    const ab = await file.arrayBuffer();
+    const { value, messages } = await mammoth.extractRawText({ arrayBuffer: ab });
+    if (messages && messages.length) console.warn('mammoth:', messages);
+    const text = String(value || '').trim();
+    if (!text) {
+      throw new Error('No readable text in this DOCX (empty, scanned images only, or unsupported). Paste text in Description or use .txt.');
+    }
+    return text;
+  }
+  if (name.endsWith('.doc')) {
+    throw new Error('Legacy .doc is not supported. Save as .docx or paste text in Description.');
+  }
+  if (name.endsWith('.pdf')) {
+    throw new Error('PDF is not extracted in the browser yet. Use .docx / .txt or paste the document text in Description.');
+  }
+  return file.text();
+}
+
+/** Backend / AI may store `materials` as a single object or string; builder always uses an array. */
+function ensureMaterialsArray(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'object') return [raw];
+  if (typeof raw === 'string' && String(raw).trim()) {
+    return [{ id: `mat-${Math.random().toString(36).slice(2)}`, label: String(raw).trim(), attachKind: null, attachValue: '' }];
+  }
+  return [];
+}
+
 function backendFlowToBuilderGraph(flow) {
   if (!flow) return { nodes: SEED_NODES, edges: SEED_EDGES };
   const nodes = (flow.nodes || []).map((node) => {
@@ -239,7 +280,7 @@ function backendFlowToBuilderGraph(flow) {
         title: node.content?.title || node.label || 'Action',
         description: node.content?.description || '',
         assignee: node.content?.assignee || '',
-        materials: (node.content?.materials || []).map((material) => ({
+        materials: ensureMaterialsArray(node.content?.materials).map((material) => ({
           id: material.id || `mat-${Math.random()}`,
           label: material.label || 'Material',
           attachKind: material.attachKind || null,
@@ -374,7 +415,7 @@ function builderGraphToBackendFlow(currentFlow, nodes, edges) {
           description: node.description || '',
           assigneeKind: String(node.assignee || '').includes('@') ? 'email' : 'office',
           assignee: node.assignee || '',
-          materials: (node.materials || []).map((material) => ({
+          materials: ensureMaterialsArray(node.materials).map((material) => ({
             id: material.id || `mat-${Math.random()}`,
             label: material.label || 'Material',
             attachKind: material.attachKind || null,
@@ -400,7 +441,7 @@ function builderGraphToBackendFlow(currentFlow, nodes, edges) {
 const nodeHeight = (node) => {
   if (node.type === 'start') return 72;
   if (node.type === 'definition') return 300;
-  if (node.type === 'action') { const m = node.materials?.length || 0; return 104 + (node.assignee ? 32 : 0) + 28 + m * 28 + 26; }
+  if (node.type === 'action') { const m = ensureMaterialsArray(node.materials).length; return 104 + (node.assignee ? 32 : 0) + 28 + m * 28 + 26; }
   if (node.type === 'publish') return 80;
   if (node.type === 'people') return node.email ? 104 : 86;
   return 72 + (node.answers?.length || 0) * 44 + 30;

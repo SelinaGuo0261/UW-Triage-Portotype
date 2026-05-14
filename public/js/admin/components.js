@@ -1456,7 +1456,10 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
   const [dragOver, setDragOver] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
+  const [aiProgress, setAiProgress] = useState('');
   const fileRef = React.useRef(null);
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   if (!open) return null;
 
@@ -1472,12 +1475,40 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
   };
 
   const startAnalysis = async () => {
+    const STEP_MS = 1500;
+    const FETCH_TOAST_MS = 180000;
+
+    const pushStep = (msg, toastDuration = STEP_MS) => {
+      setAiProgress(msg);
+      toast(msg, { duration: toastDuration });
+    };
+
     setAnalyzing(true);
     setAnalysisError('');
-    toast('AI analysis starting…');
+    setAiProgress('');
     try {
-      const fileText = file ? await file.text() : '';
+      pushStep('AI 分析已开始…');
+      await sleep(STEP_MS);
+
+      pushStep('正在确认文件类型与输入来源…');
+      await sleep(STEP_MS);
+
+      let fileText = '';
+      if (file) {
+        pushStep('AI：正在从文档提取信息…');
+        fileText = await extractUploadTextForAi(file);
+        await sleep(STEP_MS);
+      }
+
+      pushStep('AI：正在整理分析材料（描述、链接、正文）…');
+      await sleep(STEP_MS);
+
       const sourceText = [desc, fileText].filter(Boolean).join('\n\n');
+      if (!sourceText.trim()) {
+        throw new Error('请先上传文件、填写描述，或粘贴政策正文（至少一种文字材料）。');
+      }
+
+      pushStep('AI：正在提取所有节点与连接…', FETCH_TOAST_MS);
       const res = await fetch(`${API_BASE}/flows`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1491,15 +1522,22 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI analysis failed');
       if (!data.flow) throw new Error('AI analysis finished but no flow was returned');
-      toast('AI flow generated');
+
+      pushStep('正在将工作流应用到画布…');
+      await sleep(STEP_MS);
+
+      pushStep('工作流生成完成');
+      await sleep(STEP_MS);
       onGenerated?.(data.flow);
       onClose();
     } catch (error) {
       const message = error.message || 'AI analysis failed';
       setAnalysisError(message);
-      toast('AI analysis failed');
+      setAiProgress(message);
+      toast(message, { duration: STEP_MS });
     } finally {
       setAnalyzing(false);
+      setAiProgress('');
     }
   };
 
@@ -1610,6 +1648,17 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
               rows={3}
             />
           </div>
+          {analyzing && aiProgress && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 7,
+              border: '1px solid color-mix(in oklch, var(--purple-600), white 65%)',
+              background: 'color-mix(in oklch, var(--purple-50), white 40%)',
+              color: 'var(--purple-900)', fontSize: 12.5, lineHeight: 1.5,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--purple-800)' }}>AI 进行中</div>
+              <div>{aiProgress}</div>
+            </div>
+          )}
           {analysisError && (
             <div style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid color-mix(in oklch, var(--accent-red), white 70%)", background: "color-mix(in oklch, var(--accent-red), white 94%)", color: "var(--accent-red)", fontSize: 12.5, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>AI analysis failed</div>

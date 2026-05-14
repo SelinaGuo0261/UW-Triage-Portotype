@@ -15,11 +15,28 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
   const [currentNode, setCurrentNode] = React.useState(rootNode);
   const [path, setPath] = React.useState([]);  // { node, answerId }[]
 
+  React.useEffect(() => {
+    if (!rootNode || rootNode.type !== "ACTION") return undefined;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (!cancelled) onResult(rootNode, []);
+    });
+    return () => { cancelled = true; };
+  }, [rootNode, onResult]);
+
   if (!rootNode) return (
     <div style={{ padding: 20, color: "var(--ink-500)", fontSize: 13 }}>
-      Flow structure invalid: no root decision node found.
+      Flow structure invalid: DEFINITION has no outgoing edge, or the target node is missing.
     </div>
   );
+
+  if (rootNode.type === "ACTION") {
+    return (
+      <div style={{ padding: 24, color: "var(--ink-600)", fontSize: 13, textAlign: "center" }}>
+        Preparing outcome…
+      </div>
+    );
+  }
 
   function pick(answerId) {
     const nextEdge = edges.find(
