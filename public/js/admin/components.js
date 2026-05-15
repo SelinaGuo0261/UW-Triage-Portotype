@@ -575,11 +575,47 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
   }, [zoom, pan, pendingConn, snapshot]);
 
-  const onWheel = (e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    setZoom(z => Math.min(2, Math.max(0.35, z + (-e.deltaY * 0.0015))));
-  };
+  /** Wheel: pinch (ctrl+wheel) or mouse wheel → zoom; trackpad two-finger scroll → pan. Uses non-passive listener so preventDefault works. */
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const LINE = WheelEvent.DOM_DELTA_LINE;
+    const PAGE = WheelEvent.DOM_DELTA_PAGE;
+    const PIXEL = WheelEvent.DOM_DELTA_PIXEL;
+    const onWheel = (e) => {
+      const absX = Math.abs(e.deltaX);
+      const absY = Math.abs(e.deltaY);
+
+      // Chromium / Safari: trackpad pinch-to-zoom is delivered as wheel + ctrlKey
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setZoom((z) => Math.min(2, Math.max(0.35, z + -e.deltaY * 0.002)));
+        return;
+      }
+
+      // Mouse wheel (line/page steps, or one large pixel “notch”) → zoom
+      const mouseLikeZoom =
+        e.deltaMode === LINE ||
+        e.deltaMode === PAGE ||
+        (e.deltaMode === PIXEL && absY >= 32 && absY > absX * 1.4);
+
+      if (mouseLikeZoom && absY >= absX) {
+        e.preventDefault();
+        let dz;
+        if (e.deltaMode === LINE) dz = -Math.sign(e.deltaY || 1) * 0.09;
+        else if (e.deltaMode === PAGE) dz = -Math.sign(e.deltaY || 1) * 0.22;
+        else dz = Math.max(-0.22, Math.min(0.22, -e.deltaY * 0.0022));
+        setZoom((z) => Math.min(2, Math.max(0.35, z + dz)));
+        return;
+      }
+
+      // Trackpad scroll (mostly small pixel deltas) → pan canvas
+      e.preventDefault();
+      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const onNodePointerDown = (e, node) => {
     if (readOnly) return;
@@ -699,7 +735,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   });
 
   return (
-    <div ref={wrapRef} className="canvas-wrap" onPointerDown={onWrapPointerDown} onWheel={onWheel} onClick={() => { setCtxMenu(null); setShowManagePeople(false); }}>
+    <div ref={wrapRef} className="canvas-wrap" onPointerDown={onWrapPointerDown} onClick={() => { setCtxMenu(null); setShowManagePeople(false); }}>
       <div className="canvas" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
         <svg className="edges-svg">
           <defs>
