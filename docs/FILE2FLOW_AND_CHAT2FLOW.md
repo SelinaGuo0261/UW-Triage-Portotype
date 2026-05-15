@@ -16,7 +16,7 @@
 
 | 字段 | 含义 |
 |------|------|
-| `name` | 流程名（前端用描述首行或文件名截断生成） |
+| `name` | 流程名草稿（前端用描述首行或文件名；后端在 **01b** 可用转述文重写为列表展示名） |
 | `sourceUrl` | 可选来源链接 |
 | `sourceFile` | 可选原始文件名（元数据，写入 flow） |
 | `sourceText` | 前端合并后的**原始**正文（见下文；后端会先转述再在部分步骤中使用） |
@@ -24,14 +24,15 @@
 
 **不存在**单独的「chat 意图分类」或第二条 API。
 
-### 1.1 后端流水线（五步主链路 + 解析失败时 JSON 修复）
+### 1.1 后端流水线（主链路 + 解析失败时 JSON 修复）
 
 **无字符分段**；`00-source-segmentation*.md` 已停用，主流程不调用。
 
 ```mermaid
 flowchart LR
   A[前端 sourceText] --> B["01 转述 restatedText"]
-  B --> C["02 预处理 candidatePoints dossier"]
+  B --> B2["01b 建议流程标题"]
+  B2 --> C["02 预处理 candidatePoints dossier"]
   C --> D["03 补全 predecessorId（可选）"]
   D --> E["04 构图 JSON"]
   E --> F[normalizeAiGraph + validateFlow]
@@ -40,6 +41,7 @@ flowchart LR
 | 步骤 | 提示词文件 | `callAi` | 输入要点 |
 |------|------------|----------|----------|
 | 1. 转述 | `prompts/file2flow/01-source-restatement.md` | 是（可跳过） | 固定英文指令 + `---` + **原始** `sourceText` |
+| 1b. 标题 | `prompts/file2flow/01b-flow-title-from-restatement.md` | 是（可跳过） | 转述全文 + 前端草稿 `name` / `sourceFile` → **简洁名**（含文书类型）；写入 `pipelineInput.name` 并覆盖最终 `flowName` 与 DEFINITION 节点 `label` |
 | 2. 预处理 | `prompts/file2flow/02-source-preprocess.md` | 是（可跳过） | **转述后**全文 `{{SOURCE_TEXT}}` → `candidatePoints`、分支 dossier 等 |
 | 3. 候选点补全 | `prompts/file2flow/03-complete-candidate-points.md` | 是（可跳过） | **原始**正文 + 转述文 + `candidatePoints` JSON；可新增点、补 `predecessorId` |
 | 4. 构图 | `prompts/file2flow/04-graph-from-source.md` | 是 | 转述全文 + **formatPreprocessDossier** 注入段 |
@@ -59,12 +61,12 @@ flowchart LR
 
 ### 2.2 文件 → 纯文本（仅 File2Flow 分支）
 
-`extractUploadTextForAi(file)`：
+`extractUploadTextForAi(file)`（`public/js/admin/helpers.js`）：
 
 - **`.txt`**：`File.text()`，UTF-8。
-- **`.docx`**：`arrayBuffer` → **Mammoth** `extractRawText`（`public/admin.html` 加载 `mammoth.browser.min.js`）。**禁止**对 docx 使用 `File.text()`。
-- **`.doc`**：不支持，提示另存为 docx 或粘贴。
-- **`.pdf`**：当前不在浏览器抽取，提示改用 docx/txt 或粘贴。
+- **`.docx`**：`arrayBuffer` → **Mammoth** `extractRawText`（`public/admin.html`）。**禁止**对 docx 使用 `File.text()`。
+- **`.pdf`**：浏览器 **pdf.js**（`admin.html` 加载 3.11.x + worker）逐页 `getTextContent` 拼接；纯扫描件无文字层时需 OCR 或改粘贴正文。
+- **`.doc`（Word 97–2003）**：浏览器无法可靠解析，经 **`POST /api/extract-doc-text`**（JSON：`filename`、`base64`）由服务端 **`word-extractor`** 从缓冲区抽正文；体积上限约 **18 MB**。
 
 ### 2.3 合并规则
 
@@ -96,6 +98,16 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 - 结果 **`restatedText`** 写入 `pipelineInput.sourceText`，供 **预处理、构图** 使用；**补全候选点**步骤另传 **原始** `fullSource`。
 - **`AI_SKIP_SOURCE_RESTATEMENT=1`**：跳过本步，`restatedText` = 原始 `sourceText`。
 - 转述结果为空则 **抛错**。
+
+### 3.1b 步骤 1b — 根据转述建议流程标题
+
+函数：**`suggestFlowTitleFromRestatement(restatedText, input, config)`**
+
+- 提示词：**`01b-flow-title-from-restatement.md`**；`{{RESTATED_TEXT}}` 为转述全文（服务端截断约 12k 字符）；`{{DRAFT_TITLE}}`、`{{SOURCE_FILE}}` 为前端草稿，供模型对齐语气与缩写。
+- 成功则 **`pipelineInput.name`** 使用该标题，后续 **`{{FLOW_NAME}}`** 均用新名；`normalizeAiGraph` 之后 **`flowName`** 与该标题对齐，且 **DEFINITION** 节点的 **`label`** 同步为该标题（首卡标题一致）。
+- 模型输出解析为单行标题（去引号 / 列表符）；失败或跳过时仍用前端 `name`。
+- 转述后正文 **不足 48** 字符时不调用标题 LLM。
+- **`AI_SKIP_FLOW_TITLE_FROM_RESTATEMENT=1`**：跳过本步。
 
 ### 3.2 步骤 2 — 源结构预处理（提取 candidatePoints）
 
@@ -149,6 +161,7 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 |------|------|
 | `step1_inputEcho` | 原始 `sourceText` 等 |
 | `step1b_restatement` | 转述 bundle |
+| **`step1c_flowTitle`** | 标题建议：`prompt` / `rawAi` / `suggestedFlowTitle` / 跳过原因 |
 | `step2_preprocess` | 预处理 bundle |
 | **`step2d_candidatePointCompletion`** | 补全步骤 bundle（或 env 跳过 / 错误） |
 | `step2c_dossierStringInjectedIntoGraphPrompt` | 实际拼进构图 prompt 的 dossier |
@@ -160,6 +173,7 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 | 变量 | 作用 |
 |------|------|
 | `AI_SKIP_SOURCE_RESTATEMENT=1` | 跳过转述 |
+| `AI_SKIP_FLOW_TITLE_FROM_RESTATEMENT=1` | 跳过 **01b** 标题 LLM |
 | `AI_SKIP_SOURCE_PREPROCESS=1` | 跳过预处理 LLM |
 | **`AI_SKIP_CANDIDATE_POINT_COMPLETION=1`** | 跳过候选点补全 LLM |
 | `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL` | AI 配置 |
@@ -167,7 +181,7 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 
 ### 3.9 与参考方案差异 / 未使用路径
 
-- 主链路：**转述 → 预处理 →（可选）补全候选点 → 构图 → 归一化**；无字符分段。
+- 主链路：**转述 → 建议标题 → 预处理 →（可选）补全候选点 → 构图 → 归一化**；无字符分段。
 - **`segmentSourceTextWithLlm` 等**：代码库可能仍存在，**主流程不调用**。
 
 ---
@@ -196,11 +210,12 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 
 ## 5. 限制与注意事项
 
-1. **主链路多次 LLM 调用**（通常：转述 + 预处理 + 补全 + 构图），耗时长、成本高；可用环境变量跳过前几步做调试。
+1. **主链路多次 LLM 调用**（通常：转述 + **建议标题** + 预处理 + 补全 + 构图），耗时长、成本高；可用环境变量跳过前几步做调试。
 2. **构图行为**依赖模型遵守 **`04-graph-from-source.md`** 的 lockstep；dossier 已加大 `candidatePoints` 保留，减少「只看见前几个点」的截断问题。
 3. **`validateFlow`** 只做结构级校验，不保证业务语义。
-4. **PDF** 未在浏览器抽取。
-5. **上下文长度**受模型窗口限制。
+4. **PDF** 使用 pdf.js 抽取可视文本层；扫描件、乱码版式可能需 OCR 或粘贴正文。
+5. **`.doc`** 经服务端 `word-extractor`；异常文件可另存 **.docx** 再试。
+6. **上下文长度**受模型窗口限制。
 
 ---
 
@@ -210,8 +225,8 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 |------|------|
 | 弹窗与请求 | `public/js/admin/components.js`（`NewFlowModal`） |
 | 文件抽取 | `public/js/admin/helpers.js`（`extractUploadTextForAi`） |
-| Mammoth | `public/admin.html` |
-| 生成主逻辑 | `server.mjs`（`generateGraph`） |
+| Mammoth / pdf.js | `public/admin.html` |
+| 生成主逻辑 | `server.mjs`（`generateGraph`、`POST /api/extract-doc-text`） |
 | 提示词 | `prompts/file2flow/*.md` |
 | Debug | `data/file2flow-debug-last.json` |
 | 候选 / dossier 快照 | `data/file2flow-segments-candidates-last.json` |

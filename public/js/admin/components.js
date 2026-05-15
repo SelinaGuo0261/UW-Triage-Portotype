@@ -86,10 +86,10 @@ function MaterialRow({ mat, onUpdate, onDelete }) {
                     </div>
                   ) : (
                     <div className="mat-pdf-drop" onClick={() => fileRef.current?.click()}>
-                      <UpIc /> Upload PDF / DOCX
+                      <UpIc /> Upload PDF / DOC / DOCX
                     </div>
                   )}
-                  <input ref={fileRef} type="file" accept=".pdf,.docx" hidden
+                  <input ref={fileRef} type="file" accept=".pdf,.doc,.docx" hidden
                     onChange={e => {
                       const f = e.target.files?.[0];
                       if (f) { onUpdate({ attachKind: 'pdf', attachValue: f.name }); setAttachOpen(false); }
@@ -1749,13 +1749,13 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
                 <div className="nf-drop-icon"><UploadIcon /></div>
                 <div className="nf-drop-title">Drag a file here</div>
                 <div className="nf-drop-sub">
-                  Drop a PDF, DOCX, or TXT — or{' '}
+                  Drop a PDF, DOC, DOCX, or TXT — or{' '}
                   <span className="nf-drop-link">browse to upload</span>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>PDF · DOCX · TXT · up to 20 MB</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>PDF · DOC · DOCX · TXT · up to ~18 MB</div>
               </div>
             )}
-            <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" hidden onChange={handleFile} />
+            <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" hidden onChange={handleFile} />
           </div>
 
           {/* Description / definition */}

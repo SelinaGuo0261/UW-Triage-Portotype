@@ -148,7 +148,7 @@ input, textarea { font-family: inherit; color: inherit; }
 .app.sidebar-collapsed .sidebar-action:hover::after { opacity: 1; }
 
 /* MAIN / CANVAS */
-.main { grid-area: main; display: flex; flex-direction: column; background: var(--canvas-bg); min-width: 0; position: relative; }
+.main { grid-area: main; display: flex; flex-direction: column; background: var(--canvas-bg); min-width: 0; min-height: 0; position: relative; }
 .canvas-header { display: flex; align-items: center; padding: 12px 20px; background: white; border-bottom: 1px solid var(--ink-200); gap: 12px; flex-shrink: 0; }
 .flow-title { font-family: var(--font-headline); font-size: 15px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
 .flow-title-input { font-family: var(--font-headline); border: none; background: transparent; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; padding: 4px 6px; border-radius: 4px; width: 260px; outline: none; }
@@ -428,7 +428,7 @@ input, textarea { font-family: inherit; color: inherit; }
     "topbar topbar"
     "leftnav main";
 }
-.library-page { display: flex; flex-direction: column; height: 100%; background: var(--ink-50); overflow: hidden; }
+.library-page { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--ink-50); overflow: hidden; }
 .library-toolbar { padding: 20px 24px 0; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
 .library-cta-row { display: flex; align-items: center; gap: 8px; }
 .library-cta-row h2 { margin: 0; font-family: var(--font-headline); font-size: 16px; font-weight: 700; color: var(--ink-900); letter-spacing: -0.015em; flex: 1; }
