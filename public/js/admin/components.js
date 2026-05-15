@@ -1529,11 +1529,11 @@ function MiniFlowPreview({ nodes, edges, small = false }) {
 }
 
 const FILE2FLOW_AI_PIPELINE_STEPS = [
-  { id: 'restate', label: 'AI 正在转述签署流程' },
-  { id: 'nodes', label: 'AI 正在提取节点' },
-  { id: 'complete', label: 'AI 正在补全节点前置关系' },
-  { id: 'graph', label: 'AI 正在生成工作流' },
-  { id: 'validate', label: 'AI 正在检查工作流' },
+  { id: 'restate', label: '转述签署流程' },
+  { id: 'nodes', label: '提取节点候选' },
+  { id: 'complete', label: '补全前置关系' },
+  { id: 'graph', label: '生成工作流图' },
+  { id: 'validate', label: '检查工作流结构' },
 ];
 
 function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
@@ -1770,63 +1770,87 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
             />
           </div>
           {analyzing && !analysisError && (
-            <div className="nf-ai-progress" style={{
-              padding: '10px 12px', borderRadius: 7,
-              border: '1px solid color-mix(in oklch, var(--purple-600), white 65%)',
-              background: 'color-mix(in oklch, var(--purple-50), white 40%)',
-              color: 'var(--purple-900)', fontSize: 12.5, lineHeight: 1.5,
-            }}>
-              <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--purple-800)' }}>AI 进行中</div>
+            <div className="nf-ai-panel">
+              <div className="nf-ai-panel-head">
+                <span className="nf-ai-panel-title">分析进度</span>
+                <span className="nf-ai-live-dot" aria-hidden />
+              </div>
               {aiPrepMessage ? (
-                <div style={{ marginBottom: aiPipelineIndex >= 0 ? 10 : 0, color: 'var(--purple-800)' }}>{aiPrepMessage}</div>
+                <p className="nf-ai-prep">{aiPrepMessage}</p>
               ) : null}
-              <ul className="nf-ai-steps" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-                  {FILE2FLOW_AI_PIPELINE_STEPS.map((step, i) => {
-                    const done = aiPipelineIndex >= 0 && i < aiPipelineIndex;
-                    const active = aiPipelineIndex >= 0 && i === aiPipelineIndex;
-                    return (
-                      <li
-                        key={step.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: 8,
-                          marginBottom: i < FILE2FLOW_AI_PIPELINE_STEPS.length - 1 ? 6 : 0,
-                          opacity: done ? 0.55 : 1,
-                          fontWeight: active ? 600 : 400,
-                          color: active ? 'var(--purple-900)' : 'var(--purple-800)',
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          style={{
-                            flexShrink: 0,
-                            width: 16,
-                            height: 16,
-                            marginTop: 1,
-                            borderRadius: '50%',
-                            border: '1.5px solid ' + (done || active ? 'var(--purple-600)' : 'var(--purple-300)'),
-                            background: done ? 'var(--purple-600)' : active ? 'var(--purple-100)' : 'transparent',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 10,
-                            color: done ? 'white' : 'var(--purple-700)',
-                          }}
-                        >
-                          {done ? '✓' : active ? '…' : ''}
+              <div className={'nf-ai-bar-track' + (aiPipelineIndex < 0 ? ' nf-ai-bar-track--indet' : '')}>
+                <div
+                  className={'nf-ai-bar-fill' + (aiPipelineIndex < 0 ? ' nf-ai-bar-fill--indet' : '')}
+                  style={
+                    aiPipelineIndex < 0
+                      ? undefined
+                      : {
+                          width: `${Math.min(
+                            100,
+                            ((aiPipelineIndex + 1) / FILE2FLOW_AI_PIPELINE_STEPS.length) * 100
+                          )}%`,
+                        }
+                  }
+                />
+              </div>
+              <ul className="nf-ai-steps" role="list">
+                {FILE2FLOW_AI_PIPELINE_STEPS.map((step, i) => {
+                  const prePipeline = aiPipelineIndex < 0;
+                  const done = aiPipelineIndex >= 0 && i < aiPipelineIndex;
+                  const active = aiPipelineIndex >= 0 && i === aiPipelineIndex;
+                  const pending = aiPipelineIndex >= 0 && i > aiPipelineIndex;
+                  return (
+                    <li
+                      key={step.id}
+                      className={
+                        'nf-ai-step' +
+                        (prePipeline ? ' nf-ai-step--upcoming' : '') +
+                        (done ? ' nf-ai-step--done' : '') +
+                        (active ? ' nf-ai-step--active' : '') +
+                        (pending ? ' nf-ai-step--pending' : '')
+                      }
+                    >
+                      <div className="nf-ai-step-rail">
+                        <span className="nf-ai-step-icon" aria-hidden>
+                          {done ? (
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                              <path
+                                d="M2.5 6L5 8.5L9.5 3.5"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          ) : active ? (
+                            <span className="nf-ai-spinner" />
+                          ) : (
+                            <span className="nf-ai-step-dot" />
+                          )}
                         </span>
-                        <span>{step.label}{active ? '…' : done ? '（完成）' : ''}</span>
-                      </li>
-                    );
-                  })}
+                      </div>
+                      <div className="nf-ai-step-text">
+                        <span className="nf-ai-step-label">{step.label}</span>
+                        {!prePipeline && active ? (
+                          <span className="nf-ai-step-meta">进行中</span>
+                        ) : null}
+                        {!prePipeline && done ? (
+                          <span className="nf-ai-step-meta nf-ai-step-meta--done">完成</span>
+                        ) : null}
+                        {!prePipeline && pending ? (
+                          <span className="nf-ai-step-meta nf-ai-step-meta--wait">排队</span>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
           {analysisError && (
-            <div style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid color-mix(in oklch, var(--accent-red), white 70%)", background: "color-mix(in oklch, var(--accent-red), white 94%)", color: "var(--accent-red)", fontSize: 12.5, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>AI analysis failed</div>
-              <div>{analysisError}</div>
+            <div className="nf-ai-error">
+              <div className="nf-ai-error-title">分析失败</div>
+              <div className="nf-ai-error-body">{analysisError}</div>
             </div>
           )}
         </div>
@@ -1848,9 +1872,38 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
 function FlowLibrary({ onOpen, onScratch, toast, onGenerated, onMoveToTrash, onRenameFlow, flows = FLOW_CARDS }) {
   const [viewMode, setViewMode] = useState('grid');
   const [sortBy, setSortBy] = useState('modified');
+  const [searchQuery, setSearchQuery] = useState('');
   const [newFlowOpen, setNewFlowOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState(null);
 
+  const flowCardTimestamp = useCallback((card, mode) => {
+    const bf = card.backendFlow;
+    if (!bf) return 0;
+    const raw = mode === 'created' ? bf.createdAt : (bf.updatedAt || bf.createdAt);
+    const t = raw ? new Date(raw).getTime() : 0;
+    return Number.isFinite(t) ? t : 0;
+  }, []);
+
+  const displayedFlows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const base = !q
+      ? [...flows]
+      : flows.filter((f) => {
+        const name = (f.name || '').toLowerCase();
+        const desc = (f.backendFlow?.description || '').toLowerCase();
+        return name.includes(q) || desc.includes(q);
+      });
+    if (sortBy === 'name') {
+      base.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    } else if (sortBy === 'created') {
+      base.sort((a, b) => flowCardTimestamp(b, 'created') - flowCardTimestamp(a, 'created'));
+    } else {
+      base.sort((a, b) => flowCardTimestamp(b, 'modified') - flowCardTimestamp(a, 'modified'));
+    }
+    return base;
+  }, [flows, searchQuery, sortBy, flowCardTimestamp]);
+
+  const searchActive = Boolean(searchQuery.trim());
   const GridIcon = () => (
     <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
       <rect x="0" y="0" width="5.5" height="5.5" rx="1" fill="currentColor"/>
@@ -1914,7 +1967,12 @@ function FlowLibrary({ onOpen, onScratch, toast, onGenerated, onMoveToTrash, onR
         <div className="library-controls">
           <div className="lib-search">
             <Icon.Search />
-            <input placeholder="Search flows…" readOnly />
+            <input
+              placeholder="Search flows…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Search flows"
+            />
           </div>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>Sort by</span>
@@ -1935,11 +1993,30 @@ function FlowLibrary({ onOpen, onScratch, toast, onGenerated, onMoveToTrash, onR
 
       {/* ── Card area ── */}
       <div className="library-scroll">
-        <div className="lib-section-label">All Flows · {flows.length}</div>
+        <div className="lib-section-label">
+          {searchActive ? (
+            <>
+              Results · {displayedFlows.length}
+              {displayedFlows.length !== flows.length ? (
+                <span className="lib-section-subcount"> of {flows.length}</span>
+              ) : null}
+            </>
+          ) : (
+            <>All Flows · {displayedFlows.length}</>
+          )}
+        </div>
 
-        {viewMode === 'grid' ? (
+        {displayedFlows.length === 0 ? (
+          <div className="lib-empty">
+            {searchActive
+              ? `没有与「${searchQuery.trim()}」匹配的流程，请尝试其他关键词。`
+              : flows.length === 0
+                ? '暂无流程，可用上方按钮创建。'
+                : '当前列表为空。'}
+          </div>
+        ) : viewMode === 'grid' ? (
           <div className="flows-grid">
-            {flows.map(f => (
+            {displayedFlows.map((f) => (
               <div key={f.id} className="flow-card" onClick={() => onOpen(f)} onContextMenu={(e) => openCardMenu(e, f)}>
                 <div className="flow-card-preview">
                   <MiniFlowPreview nodes={f.nodes} edges={f.edges} />
@@ -1967,7 +2044,7 @@ function FlowLibrary({ onOpen, onScratch, toast, onGenerated, onMoveToTrash, onR
           </div>
         ) : (
           <div className="flows-list">
-            {flows.map(f => (
+            {displayedFlows.map(f => (
               <div key={f.id} className="flow-card-list" onClick={() => onOpen(f)} onContextMenu={(e) => openCardMenu(e, f)}>
                 <div className="flow-card-list-preview">
                   <MiniFlowPreview nodes={f.nodes} edges={f.edges} small />
@@ -1991,19 +2068,20 @@ function FlowLibrary({ onOpen, onScratch, toast, onGenerated, onMoveToTrash, onR
             ))}
           </div>
         )}
-
       </div>
 
       {/* Pagination — sticky bottom, only when > 8 cards */}
-      {flows.length > 8 && (
+      {displayedFlows.length > 8 && (
         <div className="pagination-row">
-          <span>Showing 1–{flows.length} of {flows.length} flows</span>
+          <span>
+            {searchActive
+              ? `Showing ${displayedFlows.length} matching flows`
+              : `Showing 1–${displayedFlows.length} of ${displayedFlows.length} flows`}
+          </span>
           <div className="page-btns">
-            <button className="page-btn" disabled><ChevL /></button>
-            <button className="page-btn active">1</button>
-            <button className="page-btn" disabled>2</button>
-            <button className="page-btn" disabled>3</button>
-            <button className="page-btn" disabled><ChevR /></button>
+            <button type="button" className="page-btn" disabled title="Previous page"><ChevL /></button>
+            <button type="button" className="page-btn active">1</button>
+            <button type="button" className="page-btn" disabled title="Next page"><ChevR /></button>
           </div>
         </div>
       )}
