@@ -14,12 +14,38 @@
 
 服务端入口均为 **`POST /api/flows`**（`server.mjs`），请求体 JSON 字段：
 
-- `name`：流程名（前端用描述首行或文件名截断生成）
-- `sourceUrl`：可选来源链接
-- `sourceFile`：可选原始文件名（元数据，写入 flow）
-- `sourceText`：交给模型的**主上下文**（上述合并结果）
+| 字段 | 含义 |
+|------|------|
+| `name` | 流程名（前端用描述首行或文件名截断生成） |
+| `sourceUrl` | 可选来源链接 |
+| `sourceFile` | 可选原始文件名（元数据，写入 flow） |
+| `sourceText` | 前端合并后的**原始**正文（见下文；后端会先转述再在部分步骤中使用） |
+| `debugFile2flow` | 可选 `true`；写入 `data/file2flow-debug-last.json` 并在响应中带 `file2flowDebugPath` |
 
-**不存在**单独的「chat 意图分类」或第二条 API：自然语言与文件正文在进入模型前已统一为一段 `sourceText`。
+**不存在**单独的「chat 意图分类」或第二条 API。
+
+### 1.1 后端流水线（五步主链路 + 解析失败时 JSON 修复）
+
+**无字符分段**；`00-source-segmentation*.md` 已停用，主流程不调用。
+
+```mermaid
+flowchart LR
+  A[前端 sourceText] --> B["01 转述 restatedText"]
+  B --> C["02 预处理 candidatePoints dossier"]
+  C --> D["03 补全 predecessorId（可选）"]
+  D --> E["04 构图 JSON"]
+  E --> F[normalizeAiGraph + validateFlow]
+```
+
+| 步骤 | 提示词文件 | `callAi` | 输入要点 |
+|------|------------|----------|----------|
+| 1. 转述 | `prompts/file2flow/01-source-restatement.md` | 是（可跳过） | 固定英文指令 + `---` + **原始** `sourceText` |
+| 2. 预处理 | `prompts/file2flow/02-source-preprocess.md` | 是（可跳过） | **转述后**全文 `{{SOURCE_TEXT}}` → `candidatePoints`、分支 dossier 等 |
+| 3. 候选点补全 | `prompts/file2flow/03-complete-candidate-points.md` | 是（可跳过） | **原始**正文 + 转述文 + `candidatePoints` JSON；可新增点、补 `predecessorId` |
+| 4. 构图 | `prompts/file2flow/04-graph-from-source.md` | 是 | 转述全文 + **formatPreprocessDossier** 注入段 |
+| — | `prompts/file2flow/05-json-repair.md` | 仅 **JSON 解析失败** | 预处理 / 补全 / 构图 任意一步坏 JSON 时的修复提示 |
+
+**构图提示**要求与 **candidatePoints** 逐项对应（lockstep）：每个候选点对应一个 `nodes[]` 项，`tempId` = 该点 `id`（如 `pt-1`）；按 `predecessorId` 连边；同一 DECISION 多子节点时需多 answer + 多出口边（见模板正文）。
 
 ---
 
@@ -35,10 +61,10 @@
 
 `extractUploadTextForAi(file)`：
 
-- **`.txt`**：`File.text()`，UTF-8 文本。
-- **`.docx`**：`arrayBuffer` → **Mammoth** `extractRawText`（在 `public/admin.html` 中通过 CDN 加载 `mammoth.browser.min.js`）。**禁止**对 docx 使用 `File.text()`（会得到 zip 二进制乱码）。
-- **`.doc`**：不支持，提示另存为 docx 或粘贴到描述。
-- **`.pdf`**：当前不在浏览器抽取，提示改用 docx/txt 或粘贴正文。
+- **`.txt`**：`File.text()`，UTF-8。
+- **`.docx`**：`arrayBuffer` → **Mammoth** `extractRawText`（`public/admin.html` 加载 `mammoth.browser.min.js`）。**禁止**对 docx 使用 `File.text()`。
+- **`.doc`**：不支持，提示另存为 docx 或粘贴。
+- **`.pdf`**：当前不在浏览器抽取，提示改用 docx/txt 或粘贴。
 
 ### 2.3 合并规则
 
@@ -46,100 +72,135 @@
 sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 ```
 
-- 仅有描述 → **Chat2Flow** 等价路径。
-- 仅有文件 → **File2Flow**（`desc` 为空字符串，不参与拼接）。
-- 两者都有 → 描述在前，全文在后，中间空一行分隔。
-
 ### 2.4 请求与 UI 反馈
 
-- `fetch("POST", /api/flows)`，JSON body 含 `name`, `sourceUrl`, `sourceFile`, `sourceText`。
-- 分析过程中分步 toast / 进度文案；长请求阶段 toast 延长显示（避免过早消失）。
-- 成功：`onGenerated(data.flow)` 注入画布并关闭弹窗；失败：错误留在弹窗内（符合「AI 错误不只用一闪 toast」的产品约定）。
+- `POST /api/flows`，body：`name`, `sourceUrl`, `sourceFile`, `sourceText`；调试可加 `debugFile2flow: true`（Admin URL **`?file2flowDebug=1`** 会自动带上）。
+- **进度**：弹窗内 **「AI 进行中」** 清单共五步视觉节奏：**转述 → 提取节点 → 补全节点前置关系 → 生成工作流 → 检查工作流**（计时器大致推进；实际后端在预处理与构图之间多一次补全 LLM）。
+- 失败信息留在弹窗红色区域。
 
 ---
 
-## 3. 后端：源文本预处理 + LLM 生成图
+## 3. 后端：`generateGraph` 详解
 
-**文件**：`server.mjs`（`analyzeSourceTextStructure`、`buildSourceTextAnalysisPrompt`、`formatPreprocessDossier`、`generateGraph`、`buildGraphPrompt`、`callAi`、`normalizeAiGraph`；`POST /api/flows` 路由）。
+**核心文件**：`server.mjs`（`restateSourceTextForFile2flow`、`analyzeSourceTextStructure`、`completeCandidatePointsWithLlm`、`buildGraphPrompt`、`normalizeAiGraph`、`validateFlow`）。
 
-### 3.1 流程串联
+**提示词目录**：`prompts/file2flow/`（每次请求读盘；`<!-- ... -->` 注释不会发给模型）。目录说明见 `prompts/file2flow/README.md`。
 
-1. **`requireAiConfig()`**  
-   使用启动时配置的 `openai` / `claude` / `kimi` 及 API Key、模型名。
+### 3.1 步骤 1 — 自然语言转述
 
-2. **（可选）源结构预处理 — 第一次 `callAi`**  
-   - 当环境变量 **`AI_SKIP_SOURCE_PREPROCESS=1`** 未设置时，先调用 **`analyzeSourceTextStructure`**。若 `sourceText.trim().length < 64`，函数直接返回 `null`（不发起 LLM）。否则提示模型只做 **文档级分析**（不分叉构图），输出严格 JSON：`segmentation`（分段）、`candidatePoints`（链式前驱/类型推断）、`earlyForks`（早述分支与后文段落归属）、`decisionOutgoingAudit`（每条分支的「下一节点」是否在全文任意位置有据）、`graphBuilderBrief`（给第二步的浓缩指令）。  
-   - 解析失败时返回空 dossier，**不阻断**主流程；单次预处理异常仅 `console.warn`。  
-   - **`formatPreprocessDossier`** 将上述字段裁剪拼接（总长约 ≤14k 字符）供主提示词注入。
+函数：**`restateSourceTextForFile2flow(fullSource, config)`**
 
-3. **`buildGraphPrompt(input, preprocessDossier)`**  
-   拼装 **第二次** `callAi` 所用的长提示词，包含：
-   - JSON schema 说明（`flowName`, `description`, `nodes[]`, `edges[]`）。
-   - 业务规则：唯一 `DEFINITION`、DEFINITION 单出边、`DECISION` 每个答案须有出边、`materials` 须为数组等。
-   - **`ACTION` 出边**：每条 `ACTION` **最多 1 条**出边（0 = 路径终点，1 = 继续到下一节点）。边上 **`sourceAnswerTempId` 应为 `null`**（与 `DEFINITION` 一致）。允许 **`ACTION→ACTION`**、**`ACTION→DECISION`**、**`ACTION→PEOPLE`**。
-   - **`DECISION` 出边**：每个选项一条出边；**真正分支**时至少 **2 个答案**（即 2 条及以上出边）；**单答案** 仅用作线性「过门 / 继续」步骤。允许 **`DECISION→ACTION`**、**`DECISION→DECISION`**、**`DECISION→PEOPLE`** 等。
-   - **带圈数字清单（可选增强）**：`extractCircledStepInventory(sourceText)` 从正文解析 `①` 单独成行、下一非空行为标题 等 UW 文档常见版式；若解析到步骤，在提示词末尾追加 **Mandatory checklist** 段落，要求模型按文档分支落实、不合并行。
-   - **结构化分析块**：若预处理成功，在正文与 checklist 之后追加 **`Structured document analysis`** 段落，明确要求构图模型按 **全文位置** 为每条 `DECISION` 出边寻找合理解释（避免「分支在前、对应 ACTION 描述在后」时误接错边）。
+- 读取 **`01-source-restatement.md`**（项目约定：**不修改**该文件正文）。
+- 实际 prompt = `{文件全文}\n\n---\n\n{原始 sourceText}`。
+- 模型应只输出两节：**1. Document Definition**、**2. Signing Process**。
+- 结果 **`restatedText`** 写入 `pipelineInput.sourceText`，供 **预处理、构图** 使用；**补全候选点**步骤另传 **原始** `fullSource`。
+- **`AI_SKIP_SOURCE_RESTATEMENT=1`**：跳过本步，`restatedText` = 原始 `sourceText`。
+- 转述结果为空则 **抛错**。
 
-4. **`callAi(prompt, config)`**（主图生成）  
-   - **Claude**：`messages` API，`max_tokens` 由环境变量或默认值控制；可选 `anthropic-beta: output-128k-2025-02-19`（当未关闭长输出 beta 且 `max_tokens > 8192`）。
-   - **OpenAI / Kimi**：兼容 `chat/completions`，`temperature: 0`；OpenAI 使用 `response_format: json_object`。
+### 3.2 步骤 2 — 源结构预处理（提取 candidatePoints）
 
-5. **抽取与解析 JSON**  
-   - `extractJsonCandidate`：优先 ```json 围栏；否则从首 `{` 到末 `}` 截取。
-   - `JSON.parse` → 失败则 **`repairJsonWithAi`**（再调一次模型修 JSON）→ 再失败则 **`repairCommonJsonIssues`** 本地正则修补 → 仍失败则抛错（错误信息中带返回片段前缀）。
+函数：**`analyzeSourceTextStructure(pipelineInput, config)`**
 
-6. **`normalizeAiGraph(parsed, input)`**  
-   - 为每个节点、答案分配持久 `id`；用 `tempId` / 旧字段建立 **节点与答案的引用映射**，解析 `edges` 上的 `sourceNodeTempId`、`sourceAnswerTempId`、`targetNodeTempId`。
-   - `ACTION` 的 `materials` 统一为数组并规范化字段。
-   - `DECISION` 若缺 `content.question`，用 `label` / `title` 兜底（便于 Researcher 向导展示）。
-   - 丢弃无法解析端点的边（无匹配 tempId 的边被过滤）。
-   - 生成画布初始 `posX`/`posY`（简单网格）。
+- 提示词：**`02-source-preprocess.md`**，`{{SOURCE_TEXT}}` = **转述后全文**。
+- 期望 JSON 字段（节选）：
+  - **`candidatePoints`**：`id`, `title`, `likelyKind`, `rationale`, `predecessorId`
+  - **`segmentation`**、**`earlyForks`**、**`decisionOutgoingAudit`**、**`graphBuilderBrief`**
+- 转述后 `sourceText.trim().length < 64`：**不调用**预处理 LLM（`skipped: true`）。
+- **`AI_SKIP_SOURCE_PREPROCESS=1`**：跳过；无 dossier，构图仅靠转述 + 规则。
+- JSON 解析失败：`repairJsonWithAi`（**`05-json-repair.md`**）→ `repairCommonJsonIssues`；仍失败则 `parsed: null`，**不阻断**（仅无 dossier）。
 
-7. **落库**  
-   `POST /api/flows` 将 `normalizeAiGraph` 结果写入新 `flow`，并返回 `validateFlow` 的 **issues**（errors / warnings），不阻塞 201 创建。
+### 3.3 步骤 2b — 补全候选点前置（`predecessorId`）
 
-### 3.2 与「两阶段 / 操作流」类方案的差异
+函数：**`completeCandidatePointsWithLlm(originalSource, restatedSource, preprocessParsed, …)`**
 
-构图主干仍是 **单次 JSON 生成 + 解析修复 + 归一化**；在 `sourceText` 与主提示词之间增加了 **可选的「源结构」预处理 LLM**（分析 JSON，非操作流），用于分段、链式与分支—后文归属提示。本原型 **未** 实现参考项目中的：intent 分流、`INSERT_NODE`/`ADD_BRANCH` 操作列表、`ensureNodesMatchEdges` 式占位补节点、独立 `jsonrepair` 依赖等。
+- 在预处理 **成功** 且存在非空 `candidatePoints` 时执行（**`AI_SKIP_CANDIDATE_POINT_COMPLETION=1`** 跳过）。
+- 提示词：**`03-complete-candidate-points.md`**；用 **原始** `sourceText` 与当前列表让模型补链、必要时 **新增** 候选点。
+- 解析失败仅 `console.warn`，**不阻断**；合并结果写回 `mergedPreprocessParsed`，再交给 **`formatPreprocessDossier`**。
 
-### 3.3 未使用的代码路径
+### 3.4 `formatPreprocessDossier`（注入构图）
 
-`server.mjs` 中的 **`generateFallbackGraph`** 为本地种子图生成函数；**当前 `POST /api/flows` 成功路径不会**在缺少 API 时静默替换为 fallback（与产品约定一致：AI 失败应显式报错）。
+- **优先输出 `candidatePoints` JSON**（标题注明须一节点一 `tempId`），避免旧版「前文过长 + 总长度 14k」把 **列表截断在中途** 导致构图只见到前几个点。
+- 常量（`server.mjs`）：**`FILE2FLOW_DOSSIER_CANDIDATE_POINTS_MAX_CHARS`**（默认 28k 量级）、**`FILE2FLOW_DOSSIER_MAX_CHARS`**（总帽，默认约 52k）；其余段落（`graphBuilderBrief`、`segmentation` 等）依次追加并可能再截断。
+- 可选字段 **`candidatePointCompletionNotes`** 来自补全步骤的 `completionNotes`。
+
+### 3.5 步骤 3 — 构图 JSON
+
+函数：**`buildGraphPrompt(pipelineInput, preprocessDossier)`** + **`callAi`**
+
+- 模板：**`04-graph-from-source.md`**。
+- **`{{SOURCE_TEXT}}`**：**转述后**全文（非原始上传正文）。
+- **`{{PREPROCESS_DOSSIER_SECTION}}`**：注入上节的 dossier（强调 `candidatePoints` lockstep 与 `predecessorId` 连边规则）。
+
+### 3.6 解析、修 JSON、归一化
+
+- 构图输出：`extractJsonCandidate` → `JSON.parse`；失败则 **`05-json-repair.md`** → `repairCommonJsonIssues`；仍失败则 **抛错**（弹窗展示）。
+- **`normalizeAiGraph`**：`tempId` → 持久 `id`，过滤无效边，网格布局；要求至少一个 **DEFINITION** 与一个 **ACTION**。
+
+### 3.7 调试与落盘
+
+| 文件 | 何时写入 | 主要内容 |
+|------|----------|----------|
+| **`data/file2flow-debug-last.json`** | `debugFile2flow: true` | 见下表 |
+| **`data/file2flow-segments-candidates-last.json`** | 每次 `POST /api/flows`（`.gitignore`） | 预处理 + **补全** + `mergedPreprocessParsed`、`dossierInjected` |
+
+**`file2flow-debug-last.json` 主要字段**：
+
+| 字段 | 含义 |
+|------|------|
+| `step1_inputEcho` | 原始 `sourceText` 等 |
+| `step1b_restatement` | 转述 bundle |
+| `step2_preprocess` | 预处理 bundle |
+| **`step2d_candidatePointCompletion`** | 补全步骤 bundle（或 env 跳过 / 错误） |
+| `step2c_dossierStringInjectedIntoGraphPrompt` | 实际拼进构图 prompt 的 dossier |
+| `step3_*` | 构图 prompt / 原始输出 / 解析 / 修复日志 |
+| `step4_normalizedGraph` | 归一化后的图 |
+
+### 3.8 环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `AI_SKIP_SOURCE_RESTATEMENT=1` | 跳过转述 |
+| `AI_SKIP_SOURCE_PREPROCESS=1` | 跳过预处理 LLM |
+| **`AI_SKIP_CANDIDATE_POINT_COMPLETION=1`** | 跳过候选点补全 LLM |
+| `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL` | AI 配置 |
+| `AI_MAX_OUTPUT_TOKENS_*` | 各提供商输出 token 上限 |
+
+### 3.9 与参考方案差异 / 未使用路径
+
+- 主链路：**转述 → 预处理 →（可选）补全候选点 → 构图 → 归一化**；无字符分段。
+- **`segmentSourceTextWithLlm` 等**：代码库可能仍存在，**主流程不调用**。
 
 ---
 
-## 4. 校验、画布与 Researcher 行为
+## 4. 校验、画布与 Researcher
 
-### 4.1 `validateFlow`（`server.mjs`）
+### 4.1 `validateFlow`（`POST /api/flows` 不阻塞 201）
 
-- 唯一 `DEFINITION`、DEFINITION 入/出边约束、孤立节点、`DECISION` 死分支、从 DEFINITION 出发是否可达至少一个 `ACTION` 等。
-- **`ACTION`**：出边数量 **> 1** 时报错（仅允许 0 或 1）。
-- **`DECISION`**：若 **≥2 个答案** 但从该节点出发的边 **少于 2 条**，给出 **warning**（提示检查连线）；每个答案仍须有独占出边（否则原有 dead branch **error**）。
+- **错误（errors）**：仍包括唯一 `DEFINITION`、DEFINITION 入/出边规则、`DECISION` **死分支**（某 answer 无出边）、`ACTION` **出边 >1**、至少一个 `ACTION` 等。
+- **警告（warnings）**（放宽「全连通」假设）：
+  - 节点 **无任何入出边**（仅画布占位）→ warning
+  - **`ACTION` / `DECISION` 无入边**（并行或未接线路径）→ warning
+  - **从 DEFINITION 沿边不可达任何 `ACTION`** → warning（画布上仍可有其他 `ACTION`）
 
-### 4.2 Admin 画布（`FlowCanvas` / `NodeView`）
+### 4.2 Admin 画布
 
-- `ACTION` 节点右侧仅 **`out`** 一条出边桩；`finishConn` 对同一 `fromPort` 会先删后加，因此画布上 **同一 Action 只会保留一条出边**。
+- `FlowCanvas` 校验：无入边的 **`action`** / **`decision`** 为 **warning**（不再当作发布阻塞 error）。
+- 保存/发布前：`builderGraphToBackendFlow`。
 
-### 4.3 Researcher 向导与静态快照
+### 4.3 Researcher
 
-- **`GraphDocWizard`**（`public/js/researcher/components.js`）：若路径上出现 **带出边的 `ACTION`**，先展示该步骤的标题/说明/材料摘要，用户点击 **「继续」** 沿 `sourceAnswerId` 为空的出边前进；仅当到达 **无出边的 `ACTION`** 时结束并进入结果态。`Back` 在 `ACTION→ACTION` 链内使用 `actionTrail` 回退。
-- **`findAllTerminalPaths`**：DFS 时 **`ACTION` 若有出边则继续向下**，只有 **无出边的 `ACTION`** 才记为一条终端路径的 `actionNode`。
-- **`snapshotToDoc` → `flow.compute`**（`public/js/researcher/helpers.js`）：沿用户所选路径遍历时，遇到 `ACTION` 会压入一步；若该 `ACTION` 仍有出边，则继续跟随后继边（优先 `sourceAnswerId == null`），以支持多段 `ACTION` 泳道式预览。
-
-### 4.4 后续编辑
-
-- Admin 画布可继续手工改节点与边，再 `PUT /api/flows/:id` 保存。
+- **`GraphDocWizard`**、**`findAllTerminalPaths`**：详见 `CLAUDE.md`。
+- 仅 **`PUBLISHED` + `PUBLIC`** 进入知识库。
 
 ---
 
 ## 5. 限制与注意事项
 
-1. **Chat 与 File 同源**：没有单独「只聊天不改图」的后端分支；所有 `sourceText` 都会触发整图生成。
-2. **PDF**：未接入文本抽取，需用户自行粘贴或换格式。
-3. **模型与配额**：长文档 + 大 `max_tokens` 仍受供应商上下文与速率限制；Claude 长输出依赖 beta 头与账号权限。
-4. **边准确度**：完全依赖单次模型输出 + `normalizeAiGraph` 解析；错误边在 `validateFlow` 中可见，需 Admin 手动调整。
-5. **带圈清单**：仅对 **可解析的 circled 版式** 追加 checklist；其它编号或表格结构仍主要靠模型与通用规则。
+1. **主链路多次 LLM 调用**（通常：转述 + 预处理 + 补全 + 构图），耗时长、成本高；可用环境变量跳过前几步做调试。
+2. **构图行为**依赖模型遵守 **`04-graph-from-source.md`** 的 lockstep；dossier 已加大 `candidatePoints` 保留，减少「只看见前几个点」的截断问题。
+3. **`validateFlow`** 只做结构级校验，不保证业务语义。
+4. **PDF** 未在浏览器抽取。
+5. **上下文长度**受模型窗口限制。
 
 ---
 
@@ -149,7 +210,10 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 |------|------|
 | 弹窗与请求 | `public/js/admin/components.js`（`NewFlowModal`） |
 | 文件抽取 | `public/js/admin/helpers.js`（`extractUploadTextForAi`） |
-| Mammoth 脚本 | `public/admin.html` |
-| HTTP + 生成 + 校验 | `server.mjs` |
+| Mammoth | `public/admin.html` |
+| 生成主逻辑 | `server.mjs`（`generateGraph`） |
+| 提示词 | `prompts/file2flow/*.md` |
+| Debug | `data/file2flow-debug-last.json` |
+| 候选 / dossier 快照 | `data/file2flow-segments-candidates-last.json` |
 
-文档版本：与仓库内实现同步描述；若改 `generateGraph` 或 `NewFlowModal` 契约，请同步更新本文。
+文档版本：与当前 `generateGraph`（含候选点补全、dossier 拼接策略、`04/05` 提示词编号）同步；改契约时请一并更新 **`prompts/file2flow/README.md`** 与 **`CLAUDE.md`**（若涉及）。

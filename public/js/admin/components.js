@@ -520,7 +520,10 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
         }
       }
       if (n.type === 'action' && !edges.some(e => e.to === n.id)) {
-        issues.push({ id: `iss-${n.id}-orphan`, level: 'err', nodeId: n.id, title: 'Action node has no incoming path', body: `"${n.title}" is unreachable.` });
+        issues.push({ id: `iss-${n.id}-orphan`, level: 'warn', nodeId: n.id, title: 'Action node has no incoming path', body: `"${n.title}" is not wired from upstream (allowed for parallel or draft paths).` });
+      }
+      if (n.type === 'decision' && !edges.some(e => e.to === n.id)) {
+        issues.push({ id: `iss-${n.id}-orphan-in`, level: 'warn', nodeId: n.id, title: 'Decision node has no incoming path', body: `"${n.title}" is not wired from upstream (allowed for parallel or draft paths).` });
       }
     });
     const suggestions = [
@@ -575,11 +578,47 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
   }, [zoom, pan, pendingConn, snapshot]);
 
-  const onWheel = (e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    setZoom(z => Math.min(2, Math.max(0.35, z + (-e.deltaY * 0.0015))));
-  };
+  /** Wheel: pinch (ctrl+wheel) or mouse wheel → zoom; trackpad two-finger scroll → pan. Uses non-passive listener so preventDefault works. */
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const LINE = WheelEvent.DOM_DELTA_LINE;
+    const PAGE = WheelEvent.DOM_DELTA_PAGE;
+    const PIXEL = WheelEvent.DOM_DELTA_PIXEL;
+    const onWheel = (e) => {
+      const absX = Math.abs(e.deltaX);
+      const absY = Math.abs(e.deltaY);
+
+      // Chromium / Safari: trackpad pinch-to-zoom is delivered as wheel + ctrlKey
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setZoom((z) => Math.min(2, Math.max(0.35, z + -e.deltaY * 0.002)));
+        return;
+      }
+
+      // Mouse wheel (line/page steps, or one large pixel “notch”) → zoom
+      const mouseLikeZoom =
+        e.deltaMode === LINE ||
+        e.deltaMode === PAGE ||
+        (e.deltaMode === PIXEL && absY >= 32 && absY > absX * 1.4);
+
+      if (mouseLikeZoom && absY >= absX) {
+        e.preventDefault();
+        let dz;
+        if (e.deltaMode === LINE) dz = -Math.sign(e.deltaY || 1) * 0.09;
+        else if (e.deltaMode === PAGE) dz = -Math.sign(e.deltaY || 1) * 0.22;
+        else dz = Math.max(-0.22, Math.min(0.22, -e.deltaY * 0.0022));
+        setZoom((z) => Math.min(2, Math.max(0.35, z + dz)));
+        return;
+      }
+
+      // Trackpad scroll (mostly small pixel deltas) → pan canvas
+      e.preventDefault();
+      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const onNodePointerDown = (e, node) => {
     if (readOnly) return;
@@ -699,7 +738,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   });
 
   return (
-    <div ref={wrapRef} className="canvas-wrap" onPointerDown={onWrapPointerDown} onWheel={onWheel} onClick={() => { setCtxMenu(null); setShowManagePeople(false); }}>
+    <div ref={wrapRef} className="canvas-wrap" onPointerDown={onWrapPointerDown} onClick={() => { setCtxMenu(null); setShowManagePeople(false); }}>
       <div className="canvas" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
         <svg className="edges-svg">
           <defs>
@@ -1489,6 +1528,14 @@ function MiniFlowPreview({ nodes, edges, small = false }) {
   );
 }
 
+const FILE2FLOW_AI_PIPELINE_STEPS = [
+  { id: 'restate', label: 'AI 正在转述签署流程' },
+  { id: 'nodes', label: 'AI 正在提取节点' },
+  { id: 'complete', label: 'AI 正在补全节点前置关系' },
+  { id: 'graph', label: 'AI 正在生成工作流' },
+  { id: 'validate', label: 'AI 正在检查工作流' },
+];
+
 function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
@@ -1496,10 +1543,40 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
   const [dragOver, setDragOver] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
-  const [aiProgress, setAiProgress] = useState('');
+  /** -1 = prep only; 0..4 = pipeline step index */
+  const [aiPipelineIndex, setAiPipelineIndex] = useState(-1);
+  const [aiPrepMessage, setAiPrepMessage] = useState('');
   const fileRef = React.useRef(null);
+  const pipelineTimerRef = React.useRef(null);
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const clearPipelineTimer = () => {
+    if (pipelineTimerRef.current) {
+      clearInterval(pipelineTimerRef.current);
+      pipelineTimerRef.current = null;
+    }
+  };
+
+  const setPrepStep = (msg) => {
+    setAiPrepMessage(msg);
+    setAiPipelineIndex(-1);
+  };
+
+  const setPipelineStep = (index) => {
+    setAiPrepMessage('');
+    setAiPipelineIndex(Math.max(0, Math.min(index, FILE2FLOW_AI_PIPELINE_STEPS.length - 1)));
+  };
+
+  const startPipelineProgressTimer = () => {
+    clearPipelineTimer();
+    setPipelineStep(0);
+    let idx = 0;
+    pipelineTimerRef.current = setInterval(() => {
+      idx = Math.min(idx + 1, FILE2FLOW_AI_PIPELINE_STEPS.length - 1);
+      setPipelineStep(idx);
+    }, 2800);
+  };
 
   if (!open) return null;
 
@@ -1515,41 +1592,36 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
   };
 
   const startAnalysis = async () => {
-    const STEP_MS = 1500;
-    const TOAST_MS = 3000;
-    const FETCH_TOAST_MS = 180000;
-
-    const pushStep = (msg, toastDuration = TOAST_MS) => {
-      setAiProgress(msg);
-      toast(msg, { duration: toastDuration });
-    };
+    const PREP_MS = 900;
 
     setAnalyzing(true);
     setAnalysisError('');
-    setAiProgress('');
+    setAiPrepMessage('');
+    setAiPipelineIndex(-1);
+    clearPipelineTimer();
     try {
-      pushStep('AI 分析已开始…');
-      await sleep(STEP_MS);
-
-      pushStep('正在确认文件类型与输入来源…');
-      await sleep(STEP_MS);
+      setPrepStep('正在确认文件类型与输入来源…');
+      await sleep(PREP_MS);
 
       let fileText = '';
       if (file) {
-        pushStep('AI：正在从文档提取信息…');
+        setPrepStep('正在从文档提取正文…');
         fileText = await extractUploadTextForAi(file);
-        await sleep(STEP_MS);
+        await sleep(PREP_MS);
       }
 
-      pushStep('AI：正在整理分析材料（描述、链接、正文）…');
-      await sleep(STEP_MS);
+      setPrepStep('正在整理分析材料（描述、链接、正文）…');
+      await sleep(PREP_MS);
 
       const sourceText = [desc, fileText].filter(Boolean).join('\n\n');
       if (!sourceText.trim()) {
         throw new Error('请先上传文件、填写描述，或粘贴政策正文（至少一种文字材料）。');
       }
 
-      pushStep('AI：正在提取所有节点与连接…', FETCH_TOAST_MS);
+      startPipelineProgressTimer();
+      const file2flowDebug =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('file2flowDebug') === '1';
       const res = await fetch(`${API_BASE}/flows`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1558,27 +1630,35 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
           sourceUrl: url || null,
           sourceFile: file?.name || null,
           sourceText,
+          ...(file2flowDebug ? { debugFile2flow: true } : {}),
         }),
       });
+      clearPipelineTimer();
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI analysis failed');
       if (!data.flow) throw new Error('AI analysis finished but no flow was returned');
 
-      pushStep('正在将工作流应用到画布…');
-      await sleep(STEP_MS);
+      setPipelineStep(FILE2FLOW_AI_PIPELINE_STEPS.length - 1);
+      setPrepStep('正在将工作流应用到画布…');
+      await sleep(PREP_MS);
 
-      pushStep('工作流生成完成');
-      await sleep(STEP_MS);
+      if (data.file2flowDebugPath) {
+        setPrepStep(`调试快照已写入：${data.file2flowDebugPath}`);
+        await sleep(1200);
+      }
+
       onGenerated?.(data.flow);
       onClose();
     } catch (error) {
       const message = error.message || 'AI analysis failed';
       setAnalysisError(message);
-      setAiProgress(message);
-      toast(message, { duration: TOAST_MS });
+      setPrepStep('');
+      setAiPipelineIndex(-1);
     } finally {
+      clearPipelineTimer();
       setAnalyzing(false);
-      setAiProgress('');
+      setAiPrepMessage('');
+      setAiPipelineIndex(-1);
     }
   };
 
@@ -1689,15 +1769,58 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
               rows={3}
             />
           </div>
-          {analyzing && aiProgress && (
-            <div style={{
+          {analyzing && !analysisError && (
+            <div className="nf-ai-progress" style={{
               padding: '10px 12px', borderRadius: 7,
               border: '1px solid color-mix(in oklch, var(--purple-600), white 65%)',
               background: 'color-mix(in oklch, var(--purple-50), white 40%)',
               color: 'var(--purple-900)', fontSize: 12.5, lineHeight: 1.5,
             }}>
-              <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--purple-800)' }}>AI 进行中</div>
-              <div>{aiProgress}</div>
+              <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--purple-800)' }}>AI 进行中</div>
+              {aiPrepMessage ? (
+                <div style={{ marginBottom: aiPipelineIndex >= 0 ? 10 : 0, color: 'var(--purple-800)' }}>{aiPrepMessage}</div>
+              ) : null}
+              <ul className="nf-ai-steps" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                  {FILE2FLOW_AI_PIPELINE_STEPS.map((step, i) => {
+                    const done = aiPipelineIndex >= 0 && i < aiPipelineIndex;
+                    const active = aiPipelineIndex >= 0 && i === aiPipelineIndex;
+                    return (
+                      <li
+                        key={step.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          marginBottom: i < FILE2FLOW_AI_PIPELINE_STEPS.length - 1 ? 6 : 0,
+                          opacity: done ? 0.55 : 1,
+                          fontWeight: active ? 600 : 400,
+                          color: active ? 'var(--purple-900)' : 'var(--purple-800)',
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          style={{
+                            flexShrink: 0,
+                            width: 16,
+                            height: 16,
+                            marginTop: 1,
+                            borderRadius: '50%',
+                            border: '1.5px solid ' + (done || active ? 'var(--purple-600)' : 'var(--purple-300)'),
+                            background: done ? 'var(--purple-600)' : active ? 'var(--purple-100)' : 'transparent',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 10,
+                            color: done ? 'white' : 'var(--purple-700)',
+                          }}
+                        >
+                          {done ? '✓' : active ? '…' : ''}
+                        </span>
+                        <span>{step.label}{active ? '…' : done ? '（完成）' : ''}</span>
+                      </li>
+                    );
+                  })}
+              </ul>
             </div>
           )}
           {analysisError && (

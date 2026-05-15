@@ -136,79 +136,382 @@ function requireAiConfig() {
   return aiConfig;
 }
 
-/** Circled digits ①…⑳ often mark table rows in UW procedure DOCX; mammoth leaves them on their own line. */
-const CIRCLED_STEP_MARKS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+const FILE2FLOW_SEGMENT_CANDIDATES_PATH = path.join(__dirname, 'data', 'file2flow-segments-candidates-last.json');
+const FILE2FLOW_PROMPTS_DIR = path.join(__dirname, 'prompts', 'file2flow');
 
-function nextNonEmptyLine(lines, startIndex) {
-  for (let j = startIndex; j < lines.length; j += 1) {
-    const t = lines[j].trim();
-    if (t) return { index: j, text: t };
+/** Remove HTML comments so README-style notes can live inside .md prompt files. */
+function stripHtmlCommentsFromPrompt(raw) {
+  return String(raw || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+}
+
+async function loadFile2flowPrompt(filename) {
+  const full = path.join(FILE2FLOW_PROMPTS_DIR, filename);
+  try {
+    const raw = await readFile(full, 'utf8');
+    return stripHtmlCommentsFromPrompt(raw);
+  } catch (e) {
+    throw new Error(`Missing or unreadable File2Flow prompt file "${filename}" (${full}): ${e.message}`);
   }
-  return null;
 }
 
-/** Pull checklist rows like "①" then next line title — used to stop the model from merging long OSP/SAGE sequences. */
-function extractCircledStepInventory(sourceText) {
-  const lines = String(sourceText || '').replace(/\r\n/g, '\n').split('\n');
-  const skip = new Set(['步骤', '环节名称', '说明', '备注', '适用场景', '主管办公室', '注意事项']);
-  const steps = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].trim();
-    if (line.length !== 1 || !CIRCLED_STEP_MARKS.includes(line)) continue;
-    const next = nextNonEmptyLine(lines, i + 1);
-    if (!next || skip.has(next.text)) continue;
-    if (CIRCLED_STEP_MARKS.includes(next.text[0])) continue;
-    steps.push({ mark: line, title: next.text.slice(0, 240) });
+function fillFile2flowPromptPlaceholders(template, vars) {
+  let out = template;
+  for (const [key, val] of Object.entries(vars)) {
+    out = out.split(`{{${key}}}`).join(String(val ?? ''));
   }
-  return steps;
+  const unreplaced = [...out.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]);
+  if (unreplaced.length) {
+    console.warn('[file2flow prompts] unreplaced placeholders:', [...new Set(unreplaced)].join(', '));
+  }
+  return out;
 }
 
-/** Optional pass-1: structure dossier for the graph LLM (segmentation, chain hints, branch↔late-section linkage). */
-function buildSourceTextAnalysisPrompt(input) {
-  const sourceText = String(input.sourceText || '');
-  const circledSteps = extractCircledStepInventory(sourceText);
-  const checklistHint = circledSteps.length
-    ? `\nParser also found circled step rows (for alignment with later graph stages):\n${circledSteps.map((s, idx) => `${idx + 1}. [${s.mark}] ${s.title}`).join('\n')}\n`
-    : '';
-  return `You are analyzing a long procedural document before another model builds a flowchart JSON.
-
-Perform ALL of the following on the SOURCE TEXT:
-1) Segmentation — split the document into segments (candidate "points" / stages). Each segment needs id, short title, summary, and roughLocation: "early"|"mid"|"late"|"whole".
-2) Chain completion — list candidatePoints with likelyKind DEFINITION|DECISION|ACTION|PEOPLE|UNKNOWN and predecessorId (another candidate id or null). Brief rationale each.
-3) Branch linkage & audit — documents often state "three cases" early, then describe case B's actions much later (not immediately after the fork). For each early fork, map each branch to later segment(s) that actually carry that branch's next steps. Then decisionOutgoingAudit: for every branch answer you infer, list documentSupportForNext: segments anywhere in the text that justify the next DECISION/ACTION (mappingConfidence high|medium|low). Flag gaps if prose for a branch seems missing.
-
-Return ONLY strict JSON (no markdown fence) with this shape:
-{
-  "segmentation": [{"id":"seg-1","title":"string","summary":"string","roughLocation":"early|mid|late|whole"}],
-  "candidatePoints": [{"id":"pt-1","title":"string","likelyKind":"DEFINITION|DECISION|ACTION|PEOPLE|UNKNOWN","predecessorId":null,"rationale":"string"}],
-  "earlyForks": [{
-    "summary":"string",
-    "branches": [{
-      "branchKey":"A",
-      "answerTextHint":"short label for a wizard answer",
-      "earlyEvidence":"string",
-      "laterLinkedSections":[{"segmentId":"seg-3","whyThisBelongsToThisBranch":"string"}],
-      "expectedNextKind":"ACTION|DECISION|PEOPLE",
-      "nextNodeContentHints":["string"]
-    }]
-  }],
-  "decisionOutgoingAudit": [{
-    "forkSummary":"string",
-    "branchKey":"string",
-    "answerTextHint":"string",
-    "documentSupportForNext":[{"segmentId":"string","snippet":"string","mappingConfidence":"high|medium|low"}],
-    "notes":"string"
-  }],
-  "graphBuilderBrief":"Concise instructions for the graph model: how to wire DECISION answers to ACTION nodes when supporting prose is non-adjacent; language may match the source document."
+/** Heuristic only: more markers ⇒ higher chance the slice is procedural (not used to extract points). */
+function markerLikelihoodForSegmentText(text) {
+  const t = String(text || '');
+  let score = 0;
+  if (/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]/.test(t)) score += 3;
+  if (/\(\s*\d{1,2}\s*\)/.test(t)) score += 2;
+  if (/^\d{1,2}\.\s/m.test(t) || /\n\d{1,2}\.\s/.test(t)) score += 1;
+  if (/^\d+\.\d+\s/m.test(t)) score += 1;
+  if (/^[a-zA-Z]\.\s/m.test(t)) score += 1;
+  if (/(若|如果|当|在[^。\n]{0,30}情况).{0,120}?(应|须|必须)/.test(t)) score += 2;
+  if (/\b(if|when)\b/i.test(t) && /\b(must|should|shall)\b/i.test(t)) score += 1;
+  if (score >= 5) return 'high';
+  if (score >= 3) return 'medium';
+  if (score >= 1) return 'low';
+  return 'none';
 }
 
-Flow name (context): ${input.name || ''}
-Source URL: ${input.sourceUrl || ''}
-Source file: ${input.sourceFile || ''}
-${checklistHint}
-SOURCE TEXT:
-${sourceText}`;
+const FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS = (() => {
+  const v = Number(process.env.FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS);
+  if (Number.isFinite(v) && v >= 4096) return Math.floor(v);
+  return 48000;
+})();
+
+function mergeAdjacentSmallestUntilMaxSegmentRanges(segs, full, maxSegments) {
+  let out = segs.map((s) => ({ start: s.start, end: s.end, text: s.text }));
+  while (out.length > maxSegments) {
+    let bestI = 0;
+    let bestLen = Infinity;
+    for (let i = 0; i < out.length - 1; i += 1) {
+      const len = out[i].text.length + out[i + 1].text.length;
+      if (len < bestLen) {
+        bestLen = len;
+        bestI = i;
+      }
+    }
+    const a = out[bestI];
+    const b = out[bestI + 1];
+    out.splice(bestI, 2, {
+      start: a.start,
+      end: b.end,
+      text: full.slice(a.start, b.end),
+    });
+  }
+  return out;
 }
+
+function rangeSegmentsToFinalOutput(ranges) {
+  return ranges.map((s, i) => ({
+    id: `seg-${String(i + 1).padStart(4, '0')}`,
+    start: s.start,
+    end: s.end,
+    text: s.text,
+    markerHint: markerLikelihoodForSegmentText(s.text),
+  }));
+}
+
+function verifySegmentCoverageOrWarn(out, n, label) {
+  let cov = 0;
+  for (const s of out) {
+    if (s.start !== cov) {
+      console.warn(`[${label}] coverage gap`, cov, s.start);
+    }
+    cov = s.end;
+  }
+  if (cov !== n) console.warn(`[${label}] coverage end`, cov, n);
+}
+
+function parseLlmSegmentationPayload(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const raw = Array.isArray(parsed.segments)
+    ? parsed.segments
+    : Array.isArray(parsed.parts)
+      ? parsed.parts
+      : null;
+  if (!raw) return null;
+  return raw.map((item) => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object' && item.text != null) return String(item.text);
+    return '';
+  });
+}
+
+function buildRangesFromSegmentTextsOrNull(full, texts) {
+  if (!Array.isArray(texts) || texts.length === 0) return null;
+  if (texts.join('') !== full) return null;
+  let pos = 0;
+  const ranges = [];
+  for (const t of texts) {
+    const slice = full.slice(pos, pos + t.length);
+    if (slice !== t) return null;
+    ranges.push({ start: pos, end: pos + t.length, text: t });
+    pos += t.length;
+  }
+  if (pos !== full.length) return null;
+  return ranges;
+}
+
+async function repairLlmSegmentationJoinMismatch(fullSource, badTexts, config) {
+  const tpl = await loadFile2flowPrompt('00-source-segmentation-fix-join.md');
+  const badJson = JSON.stringify({ segments: badTexts.map((text) => ({ text })) });
+  const maxBad = 100000;
+  const badSlice = badJson.length > maxBad ? `${badJson.slice(0, maxBad)}\n…(truncated, ${badJson.length} chars total)` : badJson;
+  const prompt = fillFile2flowPromptPlaceholders(tpl, {
+    SOURCE_LENGTH: String(fullSource.length),
+    SOURCE_TEXT: fullSource,
+    BAD_SEGMENTS_JSON: badSlice,
+  });
+  const rawAi = await callAi(prompt, config);
+  let jsonText = extractJsonCandidate(rawAi);
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    const repaired = await repairJsonWithAi(jsonText, e.message, config, 'LLM segmentation fix JSON with segments[].text');
+    jsonText = extractJsonCandidate(repaired);
+    parsed = JSON.parse(jsonText);
+  }
+  return parseLlmSegmentationPayload(parsed);
+}
+
+/**
+ * Primary: LLM splits SOURCE_TEXT into contiguous segments (lossless join).
+ * Fallback: `segmentSourceTextHeuristic` on parse/join failure or oversize source.
+ */
+async function segmentSourceTextWithLlm(fullSource, config) {
+  const full = String(fullSource || '');
+  const n = full.length;
+  if (!n) return { segments: [], debug: { mode: 'empty' } };
+
+  if (process.env.FILE2FLOW_USE_HEURISTIC_SEGMENTS === '1') {
+    const segments = segmentSourceTextHeuristic(full);
+    return { segments, debug: { mode: 'heuristic_env', reason: 'FILE2FLOW_USE_HEURISTIC_SEGMENTS=1' } };
+  }
+
+  if (n > FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS) {
+    console.warn(
+      `[file2flow] source length ${n} exceeds FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS (${FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS}); using heuristic segmentation.`,
+    );
+    const segments = segmentSourceTextHeuristic(full);
+    return {
+      segments,
+      debug: { mode: 'heuristic_oversize', cap: FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS, sourceLength: n },
+    };
+  }
+
+  if (n < 64) {
+    const ranges = [{ start: 0, end: n, text: full }];
+    return {
+      segments: rangeSegmentsToFinalOutput(ranges),
+      debug: { mode: 'short_no_llm', sourceLength: n },
+    };
+  }
+
+  const tpl = await loadFile2flowPrompt('00-source-segmentation.md');
+  const prompt = fillFile2flowPromptPlaceholders(tpl, {
+    SOURCE_LENGTH: String(n),
+    SOURCE_TEXT: full,
+  });
+
+  let rawAi = null;
+  let texts = null;
+  let parseNote = null;
+
+  try {
+    rawAi = await callAi(prompt, config);
+    let jsonText = extractJsonCandidate(rawAi);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      const repaired = await repairJsonWithAi(
+        jsonText,
+        e.message,
+        config,
+        'LLM document segmentation JSON with top-level segments array of objects {text}',
+      );
+      jsonText = extractJsonCandidate(repaired);
+      parsed = JSON.parse(jsonText);
+      parseNote = `json_repair:${e.message}`;
+    }
+    texts = parseLlmSegmentationPayload(parsed);
+    if (!texts || texts.length === 0) {
+      throw new Error('LLM returned no segments');
+    }
+    if (texts.join('') !== full) {
+      const retried = await repairLlmSegmentationJoinMismatch(full, texts, config);
+      if (Array.isArray(retried) && retried.join('') === full) {
+        texts = retried;
+        parseNote = (parseNote ? `${parseNote};` : '') + 'join_repair_ok';
+      }
+    }
+  } catch (e) {
+    console.warn('[file2flow] LLM segmentation failed:', e?.message || e);
+    const segments = segmentSourceTextHeuristic(full);
+    return {
+      segments,
+      debug: {
+        mode: 'heuristic_fallback',
+        error: String(e?.message || e),
+        rawAiPrefix: rawAi ? String(rawAi).slice(0, 800) : null,
+      },
+    };
+  }
+
+  if (!texts || texts.join('') !== full) {
+    console.warn('[file2flow] LLM segments do not concatenate to source; using heuristic segmentation.');
+    const segments = segmentSourceTextHeuristic(full);
+    return {
+      segments,
+      debug: {
+        mode: 'heuristic_join_mismatch',
+        parseNote,
+        rawAiPrefix: rawAi ? String(rawAi).slice(0, 800) : null,
+      },
+    };
+  }
+
+  let ranges = buildRangesFromSegmentTextsOrNull(full, texts);
+  if (!ranges) {
+    const segments = segmentSourceTextHeuristic(full);
+    return { segments, debug: { mode: 'heuristic_range_build_failed', parseNote } };
+  }
+  ranges = mergeAdjacentSmallestUntilMaxSegmentRanges(ranges, full, 96);
+  const segments = rangeSegmentsToFinalOutput(ranges);
+  verifySegmentCoverageOrWarn(segments, n, 'segmentSourceTextWithLlm');
+  return {
+    segments,
+    debug: {
+      mode: 'llm',
+      segmentCount: segments.length,
+      parseNote: parseNote || null,
+      rawAiPrefix: rawAi ? String(rawAi).slice(0, 400) : null,
+    },
+  };
+}
+
+/**
+ * Heuristic fallback: paragraph boundaries, sentence-ish splits, tiny merges, cap 96 segments.
+ * Used when LLM segmentation fails or source exceeds FILE2FLOW_LLM_SEGMENT_MAX_SOURCE_CHARS.
+ */
+function segmentSourceTextHeuristic(sourceText) {
+  const full = String(sourceText || '').replace(/\r\n/g, '\n');
+  const n = full.length;
+  if (!n) return [];
+
+  const MAX_CHUNK = 980;
+  const MIN_CHUNK = 52;
+  const MAX_SEGMENTS = 96;
+
+  const parts = [];
+  let pos = 0;
+  while (pos < n) {
+    const idx = full.indexOf('\n\n', pos);
+    if (idx === -1) {
+      parts.push([pos, n]);
+      break;
+    }
+    parts.push([pos, idx + 2]);
+    pos = idx + 2;
+  }
+
+  const rawSegs = [];
+  for (const [a, b] of parts) {
+    if (a >= b) continue;
+    if (b - a <= MAX_CHUNK) {
+      rawSegs.push({ start: a, end: b, text: full.slice(a, b) });
+      continue;
+    }
+    let p = a;
+    while (p < b) {
+      const hardEnd = Math.min(b, p + MAX_CHUNK);
+      if (hardEnd >= b) {
+        rawSegs.push({ start: p, end: b, text: full.slice(p, b) });
+        break;
+      }
+      const slice = full.slice(p, hardEnd);
+      const punct = /[。！？!?]\s*|\n+/g;
+      let lastCut = -1;
+      let m;
+      while ((m = punct.exec(slice)) !== null) {
+        const cut = p + m.index + m[0].length;
+        if (cut - p >= MIN_CHUNK) lastCut = cut;
+      }
+      const cutAt = lastCut > p ? lastCut : hardEnd;
+      rawSegs.push({ start: p, end: cutAt, text: full.slice(p, cutAt) });
+      p = cutAt;
+    }
+  }
+
+  const mergedTiny = [];
+  for (const s of rawSegs) {
+    if (mergedTiny.length && mergedTiny[mergedTiny.length - 1].text.length < MIN_CHUNK) {
+      const prev = mergedTiny.pop();
+      mergedTiny.push({
+        start: prev.start,
+        end: s.end,
+        text: full.slice(prev.start, s.end),
+      });
+    } else {
+      mergedTiny.push({ ...s });
+    }
+  }
+  if (mergedTiny.length >= 2 && mergedTiny[mergedTiny.length - 1].text.length < MIN_CHUNK) {
+    const last = mergedTiny.pop();
+    const prev = mergedTiny.pop();
+    mergedTiny.push({ start: prev.start, end: last.end, text: full.slice(prev.start, last.end) });
+  }
+
+  let segs = mergedTiny.map((s) => ({ start: s.start, end: s.end, text: s.text }));
+  segs = mergeAdjacentSmallestUntilMaxSegmentRanges(segs, full, MAX_SEGMENTS);
+
+  const out = rangeSegmentsToFinalOutput(segs);
+
+  verifySegmentCoverageOrWarn(out, n, 'segmentSourceTextHeuristic');
+
+  return out;
+}
+
+function formatDocumentSegmentsForPrompt(segments) {
+  const lines = ['=== DOCUMENT SEGMENTS (server; contiguous; cover entire file; each char appears once) ==='];
+  for (const s of segments) {
+    lines.push(`<<< ${s.id} chars ${s.start}-${s.end} markerHint=${s.markerHint} >>>`);
+    lines.push(s.text);
+    lines.push(`<<< end ${s.id} >>>`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+async function writeFile2flowSegmentCandidates(payload) {
+  await writeFile(FILE2FLOW_SEGMENT_CANDIDATES_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
+/** Optional pass-1: structure dossier for the graph LLM (candidate points, branch linkage). */
+async function buildSourceTextAnalysisPrompt(input) {
+  const tpl = await loadFile2flowPrompt('02-source-preprocess.md');
+  return fillFile2flowPromptPlaceholders(tpl, {
+    FLOW_NAME: input.name || '',
+    SOURCE_URL: input.sourceUrl || '',
+    SOURCE_FILE: input.sourceFile || '',
+    SOURCE_TEXT: String(input.sourceText || ''),
+  });
+}
+
+/** Keep candidatePoints JSON intact for graph step — was losing tail when dossier hit char cap. */
+const FILE2FLOW_DOSSIER_MAX_CHARS = 52000;
+const FILE2FLOW_DOSSIER_CANDIDATE_POINTS_MAX_CHARS = 28000;
 
 function formatPreprocessDossier(obj) {
   if (!obj || typeof obj !== 'object') return '';
@@ -217,82 +520,236 @@ function formatPreprocessDossier(obj) {
   const audit = Array.isArray(obj.decisionOutgoingAudit) ? JSON.stringify(obj.decisionOutgoingAudit) : '';
   const seg = Array.isArray(obj.segmentation) ? JSON.stringify(obj.segmentation) : '';
   const chain = Array.isArray(obj.candidatePoints) ? JSON.stringify(obj.candidatePoints) : '';
+  const completionNotes = String(obj.candidatePointCompletionNotes || '').trim();
   const parts = [];
-  if (brief) parts.push('## graphBuilderBrief\n' + brief);
-  if (seg) parts.push('## segmentation (JSON)\n' + seg.slice(0, 4500));
-  if (chain) parts.push('## candidatePoints (JSON)\n' + chain.slice(0, 4500));
-  if (forks) parts.push('## earlyForks (JSON)\n' + forks.slice(0, 5500));
-  if (audit) parts.push('## decisionOutgoingAudit (JSON)\n' + audit.slice(0, 4500));
-  return parts.join('\n\n').slice(0, 14000);
+  /** candidatePoints first so truncation never clips the node list */
+  const chainChunk = chain.slice(0, FILE2FLOW_DOSSIER_CANDIDATE_POINTS_MAX_CHARS);
+  if (chainChunk) parts.push('## candidatePoints (JSON) — emit one graph node per entry; use tempId = id\n' + chainChunk);
+  if (completionNotes) parts.push('## candidatePointCompletionNotes\n' + completionNotes.slice(0, 4000));
+  if (brief) parts.push('## graphBuilderBrief\n' + brief.slice(0, 12000));
+  if (seg) parts.push('## segmentation (JSON)\n' + seg.slice(0, 8000));
+  if (forks) parts.push('## earlyForks (JSON)\n' + forks.slice(0, 12000));
+  if (audit) parts.push('## decisionOutgoingAudit (JSON)\n' + audit.slice(0, 8000));
+  return parts.join('\n\n').slice(0, FILE2FLOW_DOSSIER_MAX_CHARS);
 }
 
-async function analyzeSourceTextStructure(input, config) {
-  const sourceText = String(input.sourceText || '').trim();
-  if (sourceText.length < 64) return null;
-  const prompt = buildSourceTextAnalysisPrompt(input);
-  const text = await callAi(prompt, config);
-  let jsonText = extractJsonCandidate(text);
+function sanitizeCompletedCandidatePoints(points) {
+  if (!Array.isArray(points)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of points) {
+    if (!raw || typeof raw !== 'object') continue;
+    const pointId = String(raw.id || '').trim();
+    if (!pointId || seen.has(pointId)) continue;
+    seen.add(pointId);
+    const pred =
+      raw.predecessorId == null || raw.predecessorId === ''
+        ? null
+        : String(raw.predecessorId).trim() || null;
+    out.push({
+      id: pointId,
+      title: String(raw.title || '').trim() || pointId,
+      likelyKind: String(raw.likelyKind || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN',
+      predecessorId: pred,
+      rationale: String(raw.rationale || '').trim(),
+    });
+  }
+  const ids = new Set(out.map((p) => p.id));
+  for (const p of out) {
+    if (p.predecessorId && !ids.has(p.predecessorId)) p.predecessorId = null;
+    if (p.predecessorId === p.id) p.predecessorId = null;
+  }
+  return out;
+}
+
+function mergePreprocessWithCandidateCompletion(preprocessParsed, completionParsed) {
+  if (!preprocessParsed || typeof preprocessParsed !== 'object') return preprocessParsed;
+  if (!completionParsed || typeof completionParsed !== 'object') return preprocessParsed;
+  const points = sanitizeCompletedCandidatePoints(completionParsed.candidatePoints);
+  if (!points.length) return preprocessParsed;
+  return {
+    ...preprocessParsed,
+    candidatePoints: points,
+    candidatePointCompletionNotes: String(completionParsed.completionNotes || '').trim() || undefined,
+  };
+}
+
+async function buildCompleteCandidatePointsPrompt(originalSource, restatedSource, candidatePoints, input) {
+  const tpl = await loadFile2flowPrompt('03-complete-candidate-points.md');
+  return fillFile2flowPromptPlaceholders(tpl, {
+    FLOW_NAME: input.name || '',
+    SOURCE_FILE: input.sourceFile || '',
+    ORIGINAL_SOURCE_TEXT: String(originalSource || ''),
+    RESTATED_SOURCE_TEXT: String(restatedSource || ''),
+    CANDIDATE_POINTS_JSON: JSON.stringify(candidatePoints, null, 2).slice(0, 14000),
+  });
+}
+
+/**
+ * Pass between preprocess and graph: fill predecessorId on headless candidate points using original text.
+ * @returns {Promise<{
+ *   skipped: boolean,
+ *   reason?: string,
+ *   prompt: string,
+ *   rawAi: string|null,
+ *   extractedJsonText: string|null,
+ *   parsed: object|null,
+ *   parseNote?: string|null,
+ *   repairRawAi?: string|null,
+ *   candidatePointsBefore?: object[]|null,
+ * }>}
+ */
+async function completeCandidatePointsWithLlm(originalSource, restatedSource, preprocessParsed, input, config) {
+  const points = Array.isArray(preprocessParsed?.candidatePoints) ? preprocessParsed.candidatePoints : [];
+  const prompt = await buildCompleteCandidatePointsPrompt(originalSource, restatedSource, points, input);
+  if (!points.length) {
+    return {
+      skipped: true,
+      reason: 'no candidatePoints from preprocess',
+      prompt,
+      rawAi: null,
+      extractedJsonText: null,
+      parsed: null,
+      candidatePointsBefore: points,
+    };
+  }
+  const original = String(originalSource || '').trim();
+  if (original.length < 32) {
+    return {
+      skipped: true,
+      reason: 'original source shorter than 32 characters',
+      prompt,
+      rawAi: null,
+      extractedJsonText: null,
+      parsed: null,
+      candidatePointsBefore: points,
+    };
+  }
+  const rawAi = await callAi(prompt, config);
+  let extractedJsonText = extractJsonCandidate(rawAi);
+  let parsed = null;
+  let parseNote = null;
+  let repairRawAi = null;
   try {
-    return JSON.parse(jsonText);
+    parsed = JSON.parse(extractedJsonText);
   } catch (e) {
     try {
-      const repaired = await repairJsonWithAi(
-        jsonText,
+      repairRawAi = await repairJsonWithAi(
+        extractedJsonText,
         e.message,
         config,
-        'a SOURCE STRUCTURE analysis dossier (segmentation, candidatePoints, earlyForks, decisionOutgoingAudit, graphBuilderBrief)'
+        'candidate point completion JSON (candidatePoints, completionNotes)'
       );
-      jsonText = extractJsonCandidate(repaired);
-      return JSON.parse(jsonText);
-    } catch {
+      extractedJsonText = extractJsonCandidate(repairRawAi);
+      parsed = JSON.parse(extractedJsonText);
+      parseNote = `JSON repair pass after: ${e.message}`;
+    } catch (e2) {
       try {
-        return JSON.parse(repairCommonJsonIssues(jsonText));
-      } catch {
-        return null;
+        extractedJsonText = repairCommonJsonIssues(extractedJsonText);
+        parsed = JSON.parse(extractedJsonText);
+        parseNote = `Local JSON cleanup after: ${e2.message}`;
+      } catch (e3) {
+        parseNote = `Parse failed: ${e.message}; AI repair: ${e2.message}; local: ${e3.message}`;
+        parsed = null;
       }
     }
   }
+  if (parsed?.candidatePoints) {
+    parsed = {
+      ...parsed,
+      candidatePoints: sanitizeCompletedCandidatePoints(parsed.candidatePoints),
+    };
+  }
+  return {
+    skipped: false,
+    prompt,
+    rawAi,
+    extractedJsonText,
+    parsed,
+    parseNote,
+    repairRawAi: repairRawAi || undefined,
+    candidatePointsBefore: points,
+  };
 }
 
-function buildGraphPrompt(input, preprocessDossier = '') {
+/**
+ * @returns {{
+ *   skipped: boolean,
+ *   reason?: string,
+ *   prompt: string,
+ *   rawAi: string|null,
+ *   extractedJsonText: string|null,
+ *   parsed: object|null,
+ *   parseNote?: string|null,
+ *   repairRawAi?: string|null,
+ * }}
+ */
+async function analyzeSourceTextStructure(input, config) {
+  const sourceText = String(input.sourceText || '').trim();
+  const prompt = await buildSourceTextAnalysisPrompt(input);
+  if (sourceText.length < 64) {
+    return {
+      skipped: true,
+      reason: 'sourceText shorter than 64 characters; preprocess LLM not called.',
+      prompt,
+      rawAi: null,
+      extractedJsonText: null,
+      parsed: null,
+    };
+  }
+  const rawAi = await callAi(prompt, config);
+  let extractedJsonText = extractJsonCandidate(rawAi);
+  let parsed = null;
+  let parseNote = null;
+  let repairRawAi = null;
+  try {
+    parsed = JSON.parse(extractedJsonText);
+  } catch (e) {
+    try {
+      repairRawAi = await repairJsonWithAi(
+        extractedJsonText,
+        e.message,
+        config,
+        'a SOURCE STRUCTURE analysis dossier (candidatePoints, segmentation, earlyForks, decisionOutgoingAudit, graphBuilderBrief)'
+      );
+      extractedJsonText = extractJsonCandidate(repairRawAi);
+      parsed = JSON.parse(extractedJsonText);
+      parseNote = `JSON repair pass after: ${e.message}`;
+    } catch (e2) {
+      try {
+        extractedJsonText = repairCommonJsonIssues(extractedJsonText);
+        parsed = JSON.parse(extractedJsonText);
+        parseNote = `Local JSON cleanup after: ${e2.message}`;
+      } catch (e3) {
+        parseNote = `Parse failed: ${e.message}; AI repair: ${e2.message}; local: ${e3.message}`;
+        parsed = null;
+      }
+    }
+  }
+  return {
+    skipped: false,
+    prompt,
+    rawAi,
+    extractedJsonText,
+    parsed,
+    parseNote,
+    repairRawAi: repairRawAi || undefined,
+  };
+}
+
+async function buildGraphPrompt(input, preprocessDossier = '') {
+  const tpl = await loadFile2flowPrompt('04-graph-from-source.md');
   const sourceText = String(input.sourceText || '');
-  const circledSteps = extractCircledStepInventory(sourceText);
-  const checklistBlock = circledSteps.length
-    ? `\n---\nMandatory checklist (parser found these rows in the text — you MUST implement every line as its own graph stage on the branch that matches the document, e.g. the OSP/SAGE sponsored-research path for ①–⑧ below; do not skip or merge rows):\n${circledSteps.map((s, idx) => `${idx + 1}. [${s.mark}] ${s.title}`).join('\n')}\n`
+  const preprocessDossierSection = preprocessDossier.trim()
+    ? `\n---\nStructured document analysis (pass-1 **candidatePoints** and branch linkage — **one graph node per candidatePoint** where possible; branches may be non-adjacent; graph need not be fully connected; missing incoming edges are OK; do not omit nodes to force connectivity):\n${preprocessDossier}\n`
     : '';
-  const dossierBlock = preprocessDossier
-    ? `\n---\nStructured document analysis (use this when wiring branches; supporting prose for a branch may appear far from where the fork is introduced — attach each DECISION answer edge to the ACTION/DECISION justified anywhere in the text, not only text adjacent to the question):\n${preprocessDossier}\n`
-    : '';
-  return `Return only strict JSON for a UW agreement triage graph with nodes and edges. Use this schema:
-{
-  "flowName": string,
-  "description": string,
-  "nodes": [
-    {"tempId": string, "type": "DEFINITION|DECISION|ACTION|PEOPLE", "label": string, "content": object, "answers": [{"tempId": string, "text": string, "order": number, "rationale": string}]}
-  ],
-  "edges": [{"sourceNodeTempId": string, "sourceAnswerTempId": string|null, "targetNodeTempId": string}]
-}
-Rules:
-- exactly one DEFINITION node
-- DEFINITION content must include description, relatedOffices, templates, and resources
-- DEFINITION has exactly one outgoing edge to the next node (DECISION, ACTION, or PEOPLE as appropriate). A flow may have zero DECISION nodes if the process is linear or single-outcome.
-- If you include DECISION nodes, each DECISION answer must have an outgoing edge
-- ACTION nodes may have **0 or 1** outgoing edge only. Use sourceAnswerTempId null on that edge (same convention as from DEFINITION). 0 = terminal outcome for that path; 1 = continue to the next ACTION, DECISION, or PEOPLE. Never attach more than one outgoing edge from the same ACTION.
-- DECISION nodes represent branching: use **two or more answers** when the source document has a real fork; a **single-answer** DECISION is allowed only for linear "continue" steps. Each answer must have exactly one outgoing edge. Allowed flows include ACTION→ACTION, ACTION→DECISION, DECISION→ACTION, and DECISION→DECISION.
-- For each DECISION answer, include **"rationale"**: a short sentence (判断依据) citing how the document supports choosing that branch; use empty string "" if none.
-- ACTION content must include title, description, assigneeKind, assignee, and materials
-- ACTION content.materials must be a JSON array (possibly empty) of objects like {"label":"..."}; never a single object or string at the top level
-- materials attachKind must be null and attachValue must be empty
-- Include at least one ACTION result.
-- DECISION nodes must set content.question (string) for the end-user wizard; keep node.label aligned with that question when possible.
-- Linear procedures: chain ACTION→ACTION or ACTION→DECISION with at most one edge per ACTION; use multi-answer DECISION only for branches (typically 2+ options). For circled/numbered step lists, prefer explicit stages rather than merging unrelated steps into one node.
-- Use double-quoted JSON keys and string values only. No comments. No trailing commas.
-
-Flow name: ${input.name || ''}
-Source URL: ${input.sourceUrl || ''}
-Source file: ${input.sourceFile || ''}
-Text:
-${sourceText}${checklistBlock}${dossierBlock}`;
+  return fillFile2flowPromptPlaceholders(tpl, {
+    FLOW_NAME: input.name || '',
+    SOURCE_URL: input.sourceUrl || '',
+    SOURCE_FILE: input.sourceFile || '',
+    SOURCE_TEXT: sourceText,
+    PREPROCESS_DOSSIER_SECTION: preprocessDossierSection,
+  });
 }
 
 function extractJsonCandidate(text) {
@@ -502,51 +959,276 @@ function generateFallbackGraph({ name, sourceFile, sourceText }) {
   return { flowName, description, nodes, edges };
 }
 
-async function generateGraph(input) {
+const FILE2FLOW_DEBUG_PATH = path.join(__dirname, 'data', 'file2flow-debug-last.json');
+
+/**
+ * Pass 0: natural-language restatement of signing process (prompt file is fixed; source appended after).
+ * @returns {{ restatedText: string, prompt: string, rawAi: string, skipped: boolean, reason?: string }}
+ */
+async function restateSourceTextForFile2flow(fullSource, config) {
+  const source = String(fullSource || '').trim();
+  if (!source) {
+    return { restatedText: '', prompt: '', rawAi: null, skipped: true, reason: 'empty sourceText' };
+  }
+  if (process.env.AI_SKIP_SOURCE_RESTATEMENT === '1') {
+    return {
+      restatedText: source,
+      prompt: '',
+      rawAi: null,
+      skipped: true,
+      reason: 'AI_SKIP_SOURCE_RESTATEMENT=1',
+    };
+  }
+  const instruction = await loadFile2flowPrompt('01-source-restatement.md');
+  const prompt = `${instruction}\n\n---\n\n${source}`;
+  const rawAi = await callAi(prompt, config);
+  const restatedText = String(rawAi || '').trim();
+  if (!restatedText) {
+    throw new Error('Source restatement LLM returned empty text.');
+  }
+  return { restatedText, prompt, rawAi, skipped: false };
+}
+
+async function generateGraph(input, debugFile2flow = false) {
+  const fullSource = String(input.sourceText || '');
   const config = requireAiConfig();
+
+  const restatement = await restateSourceTextForFile2flow(fullSource, config);
+  const pipelineSource = restatement.restatedText;
+  const pipelineInput = { ...input, sourceText: pipelineSource };
+
+  const snap = debugFile2flow
+    ? {
+        generatedAt: now(),
+        step1_inputEcho: {
+          name: input.name ?? null,
+          sourceFile: input.sourceFile ?? null,
+          sourceUrl: input.sourceUrl ?? null,
+          sourceText: fullSource,
+        },
+        step1b_restatement: {
+          skipped: restatement.skipped,
+          reason: restatement.reason ?? null,
+          prompt: restatement.prompt,
+          rawAi: restatement.rawAi,
+          restatedText: pipelineSource,
+        },
+      }
+    : null;
   let preprocessDossier = '';
-  if (process.env.AI_SKIP_SOURCE_PREPROCESS !== '1') {
+  if (process.env.AI_SKIP_SOURCE_PREPROCESS === '1') {
+    if (snap) snap.step2_preprocess = { skippedByEnv: 'AI_SKIP_SOURCE_PREPROCESS=1' };
     try {
-      const dossierObj = await analyzeSourceTextStructure(input, config);
-      preprocessDossier = formatPreprocessDossier(dossierObj);
+      await writeFile2flowSegmentCandidates({
+        generatedAt: now(),
+        phase: 'preprocess_skipped_by_env',
+        sourceMeta: {
+          name: input.name,
+          sourceFile: input.sourceFile,
+          sourceUrl: input.sourceUrl,
+          sourceLength: fullSource.length,
+          restatedLength: pipelineSource.length,
+        },
+        restatement: {
+          skipped: restatement.skipped,
+          reason: restatement.reason ?? null,
+          rawAi: restatement.rawAi,
+        },
+        restatedText: pipelineSource,
+      });
+    } catch {
+      /* ignore */
+    }
+  } else {
+    try {
+      const bundle = await analyzeSourceTextStructure(pipelineInput, config);
+      let mergedParsed = bundle?.parsed ?? null;
+      let completionBundle = null;
+      if (
+        mergedParsed &&
+        Array.isArray(mergedParsed.candidatePoints) &&
+        mergedParsed.candidatePoints.length > 0 &&
+        process.env.AI_SKIP_CANDIDATE_POINT_COMPLETION !== '1'
+      ) {
+        try {
+          completionBundle = await completeCandidatePointsWithLlm(
+            fullSource,
+            pipelineSource,
+            mergedParsed,
+            pipelineInput,
+            config
+          );
+          if (completionBundle?.parsed) {
+            mergedParsed = mergePreprocessWithCandidateCompletion(mergedParsed, completionBundle.parsed);
+          }
+        } catch (completionErr) {
+          console.warn('[candidate point completion]', completionErr?.message || completionErr);
+          completionBundle = { error: String(completionErr?.message || completionErr) };
+        }
+      } else if (process.env.AI_SKIP_CANDIDATE_POINT_COMPLETION === '1') {
+        completionBundle = { skippedByEnv: 'AI_SKIP_CANDIDATE_POINT_COMPLETION=1' };
+      }
+      preprocessDossier = formatPreprocessDossier(mergedParsed);
+      if (snap) snap.step2_preprocess = bundle;
+      if (snap) snap.step2d_candidatePointCompletion = completionBundle;
+      if (snap) snap.step2c_dossierStringInjectedIntoGraphPrompt = preprocessDossier;
+      try {
+        await writeFile2flowSegmentCandidates({
+          generatedAt: now(),
+          phase: 'after_candidate_point_completion',
+          sourceMeta: {
+            name: input.name ?? null,
+            sourceFile: input.sourceFile ?? null,
+            sourceUrl: input.sourceUrl ?? null,
+            sourceLength: fullSource.length,
+            restatedLength: pipelineSource.length,
+          },
+          restatement: {
+            skipped: restatement.skipped,
+            reason: restatement.reason ?? null,
+            rawAi: restatement.rawAi,
+          },
+          restatedText: pipelineSource,
+          preprocess: {
+            skipped: bundle.skipped,
+            parseNote: bundle.parseNote,
+            rawAi: bundle.rawAi,
+            extractedJsonText: bundle.extractedJsonText,
+            parsed: bundle.parsed,
+          },
+          candidatePointCompletion: completionBundle
+            ? {
+                skipped: completionBundle.skipped,
+                reason: completionBundle.reason ?? null,
+                parseNote: completionBundle.parseNote ?? null,
+                rawAi: completionBundle.rawAi ?? null,
+                extractedJsonText: completionBundle.extractedJsonText ?? null,
+                parsed: completionBundle.parsed ?? null,
+                candidatePointsBefore: completionBundle.candidatePointsBefore ?? null,
+                error: completionBundle.error ?? null,
+                skippedByEnv: completionBundle.skippedByEnv ?? null,
+              }
+            : null,
+          mergedPreprocessParsed: mergedParsed,
+          dossierInjected: preprocessDossier,
+        });
+      } catch (e) {
+        console.warn('[file2flow segment candidates file]', e?.message || e);
+      }
     } catch (e) {
       console.warn('[source preprocess]', e?.message || e);
+      if (snap) snap.step2_preprocess = { error: String(e?.message || e) };
+      try {
+        await writeFile2flowSegmentCandidates({
+          generatedAt: now(),
+          phase: 'preprocess_error',
+          sourceMeta: {
+            name: input.name ?? null,
+            sourceFile: input.sourceFile ?? null,
+            sourceUrl: input.sourceUrl ?? null,
+            sourceLength: fullSource.length,
+            restatedLength: pipelineSource.length,
+          },
+          restatement: {
+            skipped: restatement.skipped,
+            reason: restatement.reason ?? null,
+            rawAi: restatement.rawAi,
+          },
+          restatedText: pipelineSource,
+          error: String(e?.message || e),
+        });
+      } catch {
+        /* ignore */
+      }
     }
   }
-  const prompt = buildGraphPrompt(input, preprocessDossier);
-  const text = await callAi(prompt, config);
-  let jsonText = extractJsonCandidate(text);
+
+  const graphPrompt = await buildGraphPrompt(pipelineInput, preprocessDossier);
+  if (snap) snap.step3_graphPrompt = graphPrompt;
+
+  const graphRawAi = await callAi(graphPrompt, config);
+  if (snap) snap.step3_graphRawAiText = graphRawAi;
+
+  let jsonText = extractJsonCandidate(graphRawAi);
+  if (snap) {
+    snap.step3_graphExtractedJsonCandidate = jsonText;
+    snap.step3_graphRepairLog = [];
+  }
+
   let parsed;
   try {
     parsed = JSON.parse(jsonText);
   } catch (error) {
+    if (snap) snap.step3_graphRepairLog.push({ stage: 'firstParse', error: error.message });
     try {
       const repaired = await repairJsonWithAi(jsonText, error.message, config, 'a UW agreement triage graph');
+      if (snap) snap.step3_graphRepairLog.push({ stage: 'aiRepairRaw', text: repaired });
       jsonText = extractJsonCandidate(repaired);
+      if (snap) {
+        snap.step3_graphExtractedJsonAfterAiRepair = jsonText;
+      }
       parsed = JSON.parse(jsonText);
     } catch (repairError) {
+      if (snap) snap.step3_graphRepairLog.push({ stage: 'aiRepairParse', error: repairError.message });
       try {
         parsed = JSON.parse(repairCommonJsonIssues(jsonText));
+        if (snap) snap.step3_graphRepairLog.push({ stage: 'localRepair', note: 'repairCommonJsonIssues applied' });
       } catch (localRepairError) {
-        throw new Error(`AI returned invalid JSON and repair failed. Original parse error: ${error.message}. Repair error: ${repairError.message}. Local cleanup error: ${localRepairError.message}. Returned text starts with: ${String(text || '').slice(0, 700)}`);
+        if (snap) {
+          snap.step_error = {
+            message: `AI returned invalid JSON and repair failed. Original: ${error.message}. Repair: ${repairError.message}. Local: ${localRepairError.message}`,
+            rawPrefix: String(graphRawAi || '').slice(0, 1200),
+          };
+          try {
+            await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(
+          `AI returned invalid JSON and repair failed. Original parse error: ${error.message}. Repair error: ${repairError.message}. Local cleanup error: ${localRepairError.message}. Returned text starts with: ${String(graphRawAi || '').slice(0, 700)}`
+        );
       }
     }
   }
-  return normalizeAiGraph(parsed, input);
+
+  if (snap) snap.step3_graphParsedJson = parsed;
+
+  let normalized;
+  try {
+    normalized = normalizeAiGraph(parsed, pipelineInput);
+  } catch (normErr) {
+    if (snap) {
+      snap.step_normalize_error = String(normErr?.message || normErr);
+      try {
+        await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
+      } catch {
+        /* ignore */
+      }
+    }
+    throw normErr;
+  }
+
+  if (snap) {
+    snap.step4_normalizedGraph = {
+      flowName: normalized.flowName,
+      description: normalized.description,
+      nodes: normalized.nodes,
+      edges: normalized.edges,
+    };
+    await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
+  }
+
+  return normalized;
 }
 
 async function repairJsonWithAi(badJson, parseError, config, schemaHint = 'a UW agreement triage graph') {
-  const repairPrompt = `Fix this malformed JSON for ${schemaHint}.
-
-Return ONLY valid strict JSON. No markdown, no comments, no explanation.
-Keep the same schema and intent. Do not add trailing commas.
-
-Parse error:
-${parseError}
-
-Malformed JSON:
-${String(badJson || '')}`;
-
+  const tpl = await loadFile2flowPrompt('05-json-repair.md');
+  const repairPrompt = fillFile2flowPromptPlaceholders(tpl, {
+    SCHEMA_HINT: schemaHint,
+    PARSE_ERROR: parseError,
+    BAD_JSON: String(badJson || ''),
+  });
   return callAi(repairPrompt, config);
 }
 
@@ -673,7 +1355,10 @@ function validateFlow(flow) {
     const incoming = edges.filter((e) => e.targetNodeId === node.id);
     const outgoing = edges.filter((e) => e.sourceNodeId === node.id);
     if (![NodeType.DEFINITION, NodeType.PEOPLE].includes(node.type) && incoming.length === 0 && outgoing.length === 0) {
-      errors.push(`${node.label} is isolated.`);
+      warnings.push(`${node.label} has no incoming or outgoing edges (on canvas only).`);
+    }
+    if ([NodeType.ACTION, NodeType.DECISION].includes(node.type) && incoming.length === 0) {
+      warnings.push(`${node.label} has no incoming edge (allowed for partial or parallel paths).`);
     }
     if (node.type === NodeType.ACTION && outgoing.length > 1) {
       errors.push(`${node.label}: ACTION may have at most one outgoing edge (found ${outgoing.length}).`);
@@ -697,7 +1382,9 @@ function validateFlow(flow) {
   }
 
   if (!actionNodes.length) errors.push('At least one ACTION node is required.');
-  if (!isAnyActionReachable(flow)) errors.push('No ACTION node is reachable from DEFINITION (follow edges from the node DEFINITION points to).');
+  if (!isAnyActionReachable(flow)) {
+    warnings.push('No ACTION node is reachable from DEFINITION along edges (other ACTION nodes may still be on the canvas).');
+  }
 
   return { errors, warnings };
 }
@@ -756,7 +1443,9 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'POST' && url.pathname === '/api/flows') {
     const body = await readJson(req);
-    const graph = await generateGraph(body);
+    const debugFile2flow = body.debugFile2flow === true;
+    if (debugFile2flow) delete body.debugFile2flow;
+    const graph = await generateGraph(body, debugFile2flow);
     const time = now();
     const flow = {
       id: id('flow'),
@@ -778,7 +1467,13 @@ async function handleApi(req, res, url) {
     const issues = validateFlow(flow);
     db.flows.unshift(flow);
     await writeDb(db);
-    return send(res, 201, { flow, issues });
+    const payload = { flow, issues };
+    if (debugFile2flow) {
+      payload.file2flowDebugPath = 'data/file2flow-debug-last.json';
+      payload.file2flowDebugNote =
+        'Full prompts, raw LLM strings, extracted JSON candidates, and normalized graph are in that file (written on server disk).';
+    }
+    return send(res, 201, payload);
   }
 
   const flowMatch = url.pathname.match(/^\/api\/flows\/([^/]+)$/);

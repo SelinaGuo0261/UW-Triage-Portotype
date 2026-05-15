@@ -152,7 +152,9 @@ The edge from a DEFINITION node to the first DECISION node has `sourceAnswerId` 
 
 Current server behavior:
 
-- optional **source-structure preprocess** LLM pass (`analyzeSourceTextStructure` → dossier injected into `buildGraphPrompt`) for segmentation, predecessor hints, and branch↔late-section linkage; set **`AI_SKIP_SOURCE_PREPROCESS=1`** to skip (one fewer API call)
+- optional **File2Flow debug dump**: JSON body `debugFile2flow: true` on `POST /api/flows` writes `data/file2flow-debug-last.json` (prompts, raw LLM text, extracted JSON, normalized graph) and returns `file2flowDebugPath` in the response; Admin URL `?file2flowDebug=1` adds that flag automatically
+- **segment + pass-1 candidate snapshot** (always overwritten on each `POST /api/flows` graph generation): `data/file2flow-segments-candidates-last.json` — restatement, `restatedText`, preprocess LLM bundle when run, dossier injected into graph prompt; gitignored like the debug dump
+- **editable LLM prompt templates** for File2Flow under `prompts/file2flow/`: `01-source-restatement.md`, `02-source-preprocess.md`, `03-complete-candidate-points.md` (original text + predecessor repair), `04-graph-from-source.md`, `05-json-repair.md`; read on each request
 - compact graph prompt: max 8 nodes, max 4 answers per decision, max 3 materials per action
 - OpenAI JSON mode when provider is `openai`
 - Claude/OpenAI/Kimi provider paths
