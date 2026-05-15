@@ -590,7 +590,33 @@ function ReadOnlyFlowCanvas({ nodes, edges }) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const handler = (e) => { e.preventDefault(); setZoom((z) => Math.max(0.25, Math.min(2, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))); };
+    const LINE = WheelEvent.DOM_DELTA_LINE;
+    const PAGE = WheelEvent.DOM_DELTA_PAGE;
+    const PIXEL = WheelEvent.DOM_DELTA_PIXEL;
+    const handler = (e) => {
+      const absX = Math.abs(e.deltaX);
+      const absY = Math.abs(e.deltaY);
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setZoom((z) => Math.max(0.25, Math.min(2, z + -e.deltaY * 0.002)));
+        return;
+      }
+      const mouseLikeZoom =
+        e.deltaMode === LINE ||
+        e.deltaMode === PAGE ||
+        (e.deltaMode === PIXEL && absY >= 32 && absY > absX * 1.4);
+      if (mouseLikeZoom && absY >= absX) {
+        e.preventDefault();
+        let dz;
+        if (e.deltaMode === LINE) dz = -Math.sign(e.deltaY || 1) * 0.09;
+        else if (e.deltaMode === PAGE) dz = -Math.sign(e.deltaY || 1) * 0.22;
+        else dz = Math.max(-0.22, Math.min(0.22, -e.deltaY * 0.0022));
+        setZoom((z) => Math.max(0.25, Math.min(2, z + dz)));
+        return;
+      }
+      e.preventDefault();
+      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+    };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
   }, []);
