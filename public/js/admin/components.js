@@ -457,17 +457,25 @@ function ManagePeopleRow({ node, onUpdate, onDelete, isLast }) {
 }
 
 function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, onNodesChange, onGraphChange, readOnly, graph }) {
-  const [nodes, setNodes] = useState(graph?.nodes || SEED_NODES);
+  const [nodes, setNodes] = useState(ensureDefinitionNode(graph?.nodes || SEED_NODES));
   const [edges, setEdges] = useState(graph?.edges || SEED_EDGES);
   const [selected, setSelected] = useState(null);
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [pan, setPan] = useState(() => panForDefinition(ensureDefinitionNode(graph?.nodes || SEED_NODES)));
   const [pendingConn, setPendingConn] = useState(null);
   const [ctxMenu, setCtxMenu] = useState(null);
   const [hoverPort, setHoverPort] = useState(null);
   const wrapRef = useRef(null);
   const panRef = useRef({ active: false, sx: 0, sy: 0, px: 0, py: 0 });
   const dragRef = useRef(null);
+  const zoomRef = useRef(zoom);
+  const panValRef = useRef(pan);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panValRef.current = pan; }, [pan]);
+  const nodesRef = useRef(nodes);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  const savedViewportRef = useRef(null);
+  const [animating, setAnimating] = useState(false);
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showManagePeople, setShowManagePeople] = useState(false);
   const [toolbarGroup, setToolbarGroup] = useState('edit');
@@ -475,13 +483,35 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(graph.nodes || []);
+    const nextNodes = ensureDefinitionNode(graph.nodes || []);
+    setNodes(nextNodes);
     setEdges(graph.edges || []);
     setSelected(null);
     setHistory({ past: [], future: [] });
-    setPan({ x: 0, y: 0 });
+    setPan(panForDefinition(nextNodes));
     setZoom(1);
   }, [graph]);
+
+  // Smooth preview enter/exit transition
+  useEffect(() => {
+    if (readOnly) {
+      savedViewportRef.current = { zoom: zoomRef.current, pan: panValRef.current };
+      const fit = computeFitViewport(nodesRef.current, wrapRef.current);
+      if (fit) { setAnimating(true); setZoom(fit.zoom); setPan(fit.pan); }
+    } else if (savedViewportRef.current) {
+      const saved = savedViewportRef.current;
+      savedViewportRef.current = null;
+      setAnimating(true);
+      setZoom(saved.zoom);
+      setPan(saved.pan);
+    }
+  }, [readOnly]);
+
+  useEffect(() => {
+    if (!animating) return;
+    const t = setTimeout(() => setAnimating(false), 520);
+    return () => clearTimeout(t);
+  }, [animating]);
 
   const snapshot = useCallback(() => {
     setHistory(h => ({ past: [...h.past.slice(-30), { nodes, edges }], future: [] }));
@@ -575,11 +605,34 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
   }, [zoom, pan, pendingConn, snapshot]);
 
-  const onWheel = (e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    setZoom(z => Math.min(2, Math.max(0.35, z + (-e.deltaY * 0.0015))));
-  };
+  // Non-passive wheel handler: prevents browser page-zoom on pinch; zooms canvas instead.
+  // Must be registered via addEventListener (not React onWheel) to allow e.preventDefault().
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const handler = (e) => {
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      const dx = e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX;
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch-to-zoom or Ctrl/Cmd+scroll → zoom canvas toward cursor position
+        const r = el.getBoundingClientRect();
+        const cx = e.clientX - r.left;
+        const cy = e.clientY - r.top;
+        const prevZoom = zoomRef.current;
+        const prevPan = panValRef.current;
+        const nextZoom = Math.min(2, Math.max(0.35, prevZoom * Math.exp(-dy * 0.004)));
+        const ratio = nextZoom / prevZoom;
+        setZoom(nextZoom);
+        setPan({ x: cx - (cx - prevPan.x) * ratio, y: cy - (cy - prevPan.y) * ratio });
+      } else {
+        // Two-finger scroll → pan canvas
+        setPan(p => ({ x: p.x - dx, y: p.y - dy }));
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
   const onNodePointerDown = (e, node) => {
     if (readOnly) return;
@@ -614,12 +667,14 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   };
 
   const deleteNode = useCallback((id) => {
+    const target = nodes.find(n => n.id === id);
+    if (target?.type === 'definition') return;
     snapshot();
     setNodes(ns => ns.filter(n => n.id !== id));
     setEdges(es => es.filter(e => e.from !== id && e.to !== id));
     setSelected(null);
     toast('Node deleted');
-  }, [snapshot, toast]);
+  }, [snapshot, toast, nodes]);
 
   const deleteEdge = useCallback((id) => {
     snapshot();
@@ -699,8 +754,8 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   });
 
   return (
-    <div ref={wrapRef} className="canvas-wrap" onPointerDown={onWrapPointerDown} onWheel={onWheel} onClick={() => { setCtxMenu(null); setShowManagePeople(false); }}>
-      <div className="canvas" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+    <div ref={wrapRef} className="canvas-wrap" onPointerDown={onWrapPointerDown} onClick={() => { setCtxMenu(null); setShowManagePeople(false); }}>
+      <div className={`canvas${animating ? ' preview-transitioning' : ''}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
         <svg className="edges-svg">
           <defs>
             <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="3.5" orient="auto">
@@ -900,7 +955,9 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
           <div className="ctx-item" onClick={() => { const n = nodes.find(x => x.id === ctxMenu.nodeId); if (n) { snapshot(); const copy = { ...n, id: 'n' + Date.now(), x: n.x + 40, y: n.y + 40, answers: n.answers?.map(a => ({ ...a, id: 'a' + Math.random(), rationaleExpanded: false })) }; setNodes(ns => [...ns, copy]); } setCtxMenu(null); }}><Icon.Copy /> Duplicate <kbd>⌘D</kbd></div>
           <div className="ctx-item" onClick={() => setCtxMenu(null)}><Icon.Link /> Copy link</div>
           <div className="ctx-divider" />
-          <div className="ctx-item danger" onClick={() => { deleteNode(ctxMenu.nodeId); setCtxMenu(null); }}><Icon.Trash /> Delete <kbd>⌫</kbd></div>
+          {nodes.find(x => x.id === ctxMenu.nodeId)?.type !== 'definition' && (
+            <div className="ctx-item danger" onClick={() => { deleteNode(ctxMenu.nodeId); setCtxMenu(null); }}><Icon.Trash /> Delete <kbd>⌫</kbd></div>
+          )}
         </div>
       )}
     </div>

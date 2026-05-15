@@ -301,10 +301,26 @@ function App() {
         ))}
 
         <div className="nav-flows-group">
-          <div className="nav-section-label">My Flows</div>
+          <div className="nav-section-label">Recent Flows</div>
           <div className="nav-flows-list">
-            {generatedFlowCards.map((f, i) => (
-              <div key={f.id || i} className="nav-item nav-flow-item" data-tooltip={f.name} title={sidebarCollapsed ? f.name : ''}>
+            {generatedFlowCards.slice(0, 4).map((f, i) => (
+              <div key={f.id || i} className="nav-item nav-flow-item" data-tooltip={f.name} title={sidebarCollapsed ? f.name : ''}
+                onClick={() => {
+                  setActiveNav('builder');
+                  if (f.backendFlow) {
+                    setActiveBackendFlow(f.backendFlow);
+                    const graph = backendFlowToBuilderGraph(f.backendFlow);
+                    setActiveGraph(graph);
+                    setCurrentGraph(graph);
+                  } else {
+                    setActiveBackendFlow(null);
+                    setActiveGraph(null);
+                    setCurrentGraph({ nodes: [], edges: [] });
+                  }
+                  setFlowTitle(f.name);
+                  setFlowDescription(f.backendFlow?.description || '');
+                  setPage('canvas');
+                }}>
                 <span className="nav-flow-dot" style={{ background: f.status === 'PUBLISHED' ? 'var(--accent-green)' : 'var(--ink-400)' }} />
                 <span className="nav-label" style={{ color: 'var(--ink-700)' }}>{f.name}</span>
               </div>

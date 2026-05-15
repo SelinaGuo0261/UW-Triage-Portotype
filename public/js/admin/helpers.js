@@ -201,6 +201,30 @@ const colorFor = (s) => {
 const SEED_NODES = [];
 const SEED_EDGES = [];
 
+const DEFAULT_DEFINITION_NODE = {
+  id: 'def-default',
+  type: 'definition',
+  x: -310, y: 80,
+  title: 'Definition',
+  body: '',
+  locked: true,
+};
+
+function ensureDefinitionNode(nodes) {
+  if (!nodes) return [DEFAULT_DEFINITION_NODE];
+  if (nodes.some(n => n.type === 'definition')) return nodes;
+  return [{ ...DEFAULT_DEFINITION_NODE, id: 'def-' + Date.now() }, ...nodes];
+}
+
+// Returns the pan offset (at zoom=1) that places the definition node at the top-left
+// with MARGIN px of breathing room.
+function panForDefinition(nodes) {
+  const MARGIN = 32;
+  const def = (nodes || []).find(n => n.type === 'definition');
+  if (!def) return { x: MARGIN, y: MARGIN };
+  return { x: -def.x + MARGIN, y: -def.y + MARGIN };
+}
+
 const NODE_W = 240;
 const API_BASE = '/api';
 
@@ -474,6 +498,33 @@ const nodeHeight = (node) => {
   }
   return 72 + (node.answers?.length || 0) * 44 + 30;
 };
+
+// Compute zoom+pan to fit all nodes centered in the viewport.
+function computeFitViewport(nodes, wrapEl, padding) {
+  padding = padding == null ? 60 : padding;
+  if (!nodes || !nodes.length || !wrapEl) return null;
+  const wrapW = wrapEl.clientWidth;
+  const wrapH = wrapEl.clientHeight;
+  const xs = nodes.map(function(n) { return n.x; });
+  const ys = nodes.map(function(n) { return n.y; });
+  const xe = nodes.map(function(n) { return n.x + NODE_W; });
+  const ye = nodes.map(function(n) { return n.y + nodeHeight(n); });
+  const minX = Math.min.apply(null, xs);
+  const minY = Math.min.apply(null, ys);
+  const maxX = Math.max.apply(null, xe);
+  const maxY = Math.max.apply(null, ye);
+  const contentW = maxX - minX;
+  const contentH = maxY - minY;
+  if (contentW <= 0 || contentH <= 0) return null;
+  const nextZoom = Math.min(1.5, Math.max(0.35, Math.min((wrapW - padding * 2) / contentW, (wrapH - padding * 2) / contentH)));
+  return {
+    zoom: nextZoom,
+    pan: {
+      x: wrapW / 2 - (minX + contentW / 2) * nextZoom,
+      y: wrapH / 2 - (minY + contentH / 2) * nextZoom,
+    },
+  };
+}
 
 const portPos = (node, portId) => {
   const h = nodeHeight(node);
