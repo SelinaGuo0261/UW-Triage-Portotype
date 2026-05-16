@@ -425,21 +425,49 @@ function normalizeNodesWithMeasuredHeights(nodes, heightsById) {
   var result = [];
   cols.forEach(function(col) {
     var sorted = col.slice().sort(function(a, b) { return (a.y || 0) - (b.y || 0); });
-    var currentY = sorted[0].y || 80;
+    // Only push nodes DOWN on overlap; preserve auto-layout's parent-centering Y values.
+    var prevBottom = -Infinity;
     sorted.forEach(function(node) {
       var h = heightsById[node.id];
       if (!h) {
         console.error('[Normalize] node has no measured height — skipped:', node.id, node.type);
         result.push(node);
+        prevBottom = (node.y || 0) + 200;
         return;
       }
-      result.push(Object.assign({}, node, { y: currentY }));
-      currentY += h + PADDING;
+      var minY = prevBottom + PADDING;
+      var origY = node.y == null ? minY : node.y;
+      var y = Math.max(origY, minY);
+      result.push(Object.assign({}, node, { y: y }));
+      prevBottom = y + h;
     });
   });
   return result;
 }
 
+/**
+ * Tidy-tree auto-layout for builder graphs.
+ *
+ * Pipeline:
+ *   1. BFS from definition → column index per node (people nodes excluded).
+ *   2. For each parent, resolve its children in a semantic order:
+ *        - decision: ordered by node.answers[] index (top answer → top branch)
+ *        - other:    edge creation order
+ *      This keeps each subtree as a contiguous block in its column, which is
+ *      what prevents edge crossings on tree-shaped flows.
+ *   3. DFS post-order Y placement: leaves stack tightly with ROW_GAP; each
+ *      parent is centered on its children's anchor midpoint (tidy-tree).
+ *   4. Unreachable / DAG remainders stack below the main tree.
+ *   5. PEOPLE nodes keep saved positions; otherwise stack at the bottom-left
+ *      row in horizontal sequence.
+ *
+ * Definition is always pinned to (X_OFFSET, Y_OFFSET) regardless of the
+ * subtree layout, so panForDefinition() always lands the canvas the same way.
+ *
+ * Post-render `normalizeNodesWithMeasuredHeights` only pushes down on overlap,
+ * so the parent-centering computed here is preserved when DOM heights differ
+ * from estimated heights.
+ */
 function autoLayoutBuilderGraph(graph) {
   const nodes = graph.nodes || [];
   const edges = graph.edges || [];
@@ -447,43 +475,139 @@ function autoLayoutBuilderGraph(graph) {
   const definition = nodes.find((node) => node.type === 'definition');
   if (!definition) return graph;
 
+  const COL_W = 330;
+  const X_OFFSET = -310;
+  const Y_OFFSET = 80;
+  const ROW_GAP = 24;
+  const PEOPLE_Y_FALLBACK = 576;
+  const PEOPLE_X_STRIDE = 220;
+
+  function estHeight(n) { return Math.max(nodeHeight(n), 96); }
+
+  // ── Phase 1 — BFS column assignment (people excluded from main flow)
   const levels = new Map([[definition.id, 0]]);
   const queue = [definition.id];
   while (queue.length) {
     const current = queue.shift();
-    const level = levels.get(current) || 0;
-    edges.filter((edge) => edge.from === current).forEach((edge) => {
-      if (!byId.has(edge.to) || levels.has(edge.to)) return;
-      levels.set(edge.to, level + 1);
-      queue.push(edge.to);
+    const level = levels.get(current);
+    edges.filter((e) => e.from === current).forEach((e) => {
+      const target = byId.get(e.to);
+      if (!target || target.type === 'people') return;
+      if (levels.has(e.to)) return;
+      levels.set(e.to, level + 1);
+      queue.push(e.to);
     });
   }
-
-  nodes.forEach((node) => {
-    if (!levels.has(node.id) && node.type !== 'people') levels.set(node.id, Math.max(1, levels.size));
+  let maxLevel = 0;
+  levels.forEach((l) => { if (l > maxLevel) maxLevel = l; });
+  // Orphans (unreachable from definition) get their own stray column past the rightmost.
+  nodes.forEach((n) => {
+    if (n.type === 'people' || n.type === 'definition') return;
+    if (!levels.has(n.id)) levels.set(n.id, maxLevel + 1);
   });
 
-  const buckets = new Map();
-  nodes.filter((node) => node.type !== 'people').forEach((node) => {
-    const level = levels.get(node.id) || 0;
-    if (!buckets.has(level)) buckets.set(level, []);
-    buckets.get(level).push(node);
+  // ── Phase 2 — resolve each parent's children in semantic order
+  function orderedChildren(nodeId) {
+    const node = byId.get(nodeId);
+    if (!node) return [];
+    const outs = edges.filter((e) => e.from === nodeId);
+    const result = [];
+    const consider = (e) => {
+      const t = byId.get(e.to);
+      if (!t || t.type === 'people') return;
+      if (!result.includes(e.to)) result.push(e.to);
+    };
+    if (node.type === 'decision' && Array.isArray(node.answers)) {
+      // Top answer first → top branch. fromPort holds the answer id.
+      const byPort = new Map();
+      outs.forEach((e) => { if (!byPort.has(e.fromPort)) byPort.set(e.fromPort, e); });
+      node.answers.forEach((a) => { const e = byPort.get(a.id); if (e) consider(e); });
+      outs.forEach(consider); // append any edges not matched to an answer (data anomalies)
+    } else {
+      outs.forEach(consider);
+    }
+    return result;
+  }
+
+  // ── Phase 3 — tidy-tree DFS Y assignment
+  const positions = new Map(); // nodeId → { x, y, h }
+  const visited = new Set();
+
+  function layoutSubtree(nodeId, startY) {
+    if (visited.has(nodeId)) {
+      const p = positions.get(nodeId);
+      return p ? { top: p.y, bottom: p.y + p.h, anchor: p.y + p.h / 2 } : null;
+    }
+    visited.add(nodeId);
+    const node = byId.get(nodeId);
+    if (!node) return null;
+    const x = X_OFFSET + (levels.get(nodeId) || 0) * COL_W;
+    const h = estHeight(node);
+    const children = orderedChildren(nodeId);
+    if (children.length === 0) {
+      positions.set(nodeId, { x, y: startY, h });
+      return { top: startY, bottom: startY + h, anchor: startY + h / 2 };
+    }
+    let y = startY;
+    let firstAnchor = null;
+    let lastAnchor = null;
+    children.forEach((cid) => {
+      const sub = layoutSubtree(cid, y);
+      if (!sub) return;
+      if (firstAnchor == null) firstAnchor = sub.anchor;
+      lastAnchor = sub.anchor;
+      y = sub.bottom + ROW_GAP;
+    });
+    const anchorY = firstAnchor != null ? (firstAnchor + lastAnchor) / 2 : startY + h / 2;
+    const myY = anchorY - h / 2;
+    positions.set(nodeId, { x, y: myY, h });
+    return { top: Math.min(startY, myY), bottom: Math.max(y - ROW_GAP, myY + h), anchor: anchorY };
+  }
+
+  layoutSubtree(definition.id, Y_OFFSET);
+
+  // Tidy-tree centering can push a parent above Y_OFFSET when its subtree is
+  // bottom-heavy (centered against children whose first sibling is at Y_OFFSET).
+  // Definition is pinned to (X_OFFSET, Y_OFFSET) — keep everything else below it.
+  let minPlacedY = Y_OFFSET;
+  positions.forEach((p) => { if (p.y < minPlacedY) minPlacedY = p.y; });
+  if (minPlacedY < Y_OFFSET) {
+    const shift = Y_OFFSET - minPlacedY;
+    positions.forEach((p) => { p.y += shift; });
+  }
+
+  // ── Phase 4 — stragglers (reachable but not visited via the main subtree, e.g. DAG fragments)
+  let strayY = Y_OFFSET;
+  positions.forEach((p) => { if (p.y + p.h + ROW_GAP > strayY) strayY = p.y + p.h + ROW_GAP; });
+  nodes.forEach((n) => {
+    if (n.type === 'people' || n.type === 'definition' || positions.has(n.id)) return;
+    const x = X_OFFSET + (levels.get(n.id) || (maxLevel + 1)) * COL_W;
+    const h = estHeight(n);
+    positions.set(n.id, { x, y: strayY, h });
+    strayY += h + ROW_GAP;
   });
 
-  const laidOut = nodes.map((node) => {
-    if (node.type === 'definition') return { ...node, x: -310, y: 80 };
-    if (node.type === 'people') return { ...node, x: node.x || 80, y: node.y || 576 };
-    const level = levels.get(node.id) || 1;
-    const bucket = buckets.get(level) || [];
-    const index = bucket.findIndex((item) => item.id === node.id);
-    const x = -310 + level * 330;
-    const y = 80 + Math.max(0, index) * 250;
-    return { ...node, x, y };
+  // ── Phase 5 — PEOPLE nodes (keep saved positions; default to a row below the flow)
+  const peopleY = Math.max(strayY, Y_OFFSET + PEOPLE_Y_FALLBACK);
+  let peopleIdx = 0;
+  nodes.filter((n) => n.type === 'people').forEach((n) => {
+    if (positions.has(n.id)) return;
+    const hasSaved = (typeof n.x === 'number' && typeof n.y === 'number' && (n.x !== 0 || n.y !== 0));
+    if (hasSaved) {
+      positions.set(n.id, { x: n.x, y: n.y, h: estHeight(n) });
+    } else {
+      positions.set(n.id, { x: 80 + peopleIdx * PEOPLE_X_STRIDE, y: peopleY, h: estHeight(n) });
+      peopleIdx += 1;
+    }
   });
 
-  // Post-render normalization (DOM-measured heights) is applied in FlowCanvas via
-  // normalizeNodesWithMeasuredHeights(). autoLayoutBuilderGraph only assigns the initial
-  // rough column/row positions; FlowCanvas corrects overlap after first render.
+  const laidOut = nodes.map((n) => {
+    if (n.type === 'definition') return { ...n, x: X_OFFSET, y: Y_OFFSET };
+    const p = positions.get(n.id);
+    return p ? { ...n, x: p.x, y: p.y } : n;
+  });
+
+  // Post-render normalization in FlowCanvas only pushes nodes down on overlap.
   return { nodes: laidOut, edges };
 }
 
