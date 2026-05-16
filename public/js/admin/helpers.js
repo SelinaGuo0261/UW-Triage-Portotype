@@ -1,4 +1,4 @@
-const { useState, useRef, useEffect, useCallback, useMemo } = React;
+const { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useReducer } = React;
 
 // ── Icons ────────────────────────────────────────────────────
 const Icon = {
@@ -180,6 +180,11 @@ const Icon = {
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
     </svg>
   ),
+  EyeOff: (p) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+    </svg>
+  ),
 };
 
 const AVATAR_COLORS = [
@@ -328,15 +333,53 @@ function backendFlowToBuilderGraph(flow) {
     }
     return { ...base, type: 'action', title: node.label || 'Action', description: '' };
   });
+  // Bug 1 fix: build a type lookup so edge normalization can detect DEFINITION sources.
+  const backendTypeById = {};
+  (flow.nodes || []).forEach(function(n) { backendTypeById[n.id] = n.type; });
+
   const edges = (flow.edges || []).map((edge) => ({
     id: edge.id,
     from: edge.sourceNodeId,
-    fromPort: edge.sourceAnswerId || 'out',
+    // DEFINITION nodes have exactly one output port ('out'). Some AI-generated flows store a
+    // non-null sourceAnswerId on the definition→decision edge, which is a generation artifact.
+    // Normalise it here so the edge always targets the registered 'out' port on the canvas.
+    fromPort: backendTypeById[edge.sourceNodeId] === 'DEFINITION' ? 'out' : (edge.sourceAnswerId || 'out'),
     to: edge.targetNodeId,
     toPort: 'in',
     locked: edge.isDeletable === false,
   }));
   return autoLayoutBuilderGraph({ nodes, edges });
+}
+
+// Normalize node Y positions using ONLY DOM-measured heights (el.offsetHeight).
+// No formulas, no constants, no per-type values.
+// Called from FlowCanvas after render — never pre-render.
+// heightsById: Map<nodeId, number> built from el.offsetHeight in useLayoutEffect.
+function normalizeNodesWithMeasuredHeights(nodes, heightsById) {
+  var PADDING = 20;
+  // Group nodes by exact X (same column = same graph level).
+  var cols = new Map();
+  nodes.forEach(function(n) {
+    var colX = n.x != null ? n.x : 0;
+    if (!cols.has(colX)) cols.set(colX, []);
+    cols.get(colX).push(n);
+  });
+  var result = [];
+  cols.forEach(function(col) {
+    var sorted = col.slice().sort(function(a, b) { return (a.y || 0) - (b.y || 0); });
+    var currentY = sorted[0].y || 80;
+    sorted.forEach(function(node) {
+      var h = heightsById[node.id];
+      if (!h) {
+        console.error('[Normalize] node has no measured height — skipped:', node.id, node.type);
+        result.push(node);
+        return;
+      }
+      result.push(Object.assign({}, node, { y: currentY }));
+      currentY += h + PADDING;
+    });
+  });
+  return result;
 }
 
 function autoLayoutBuilderGraph(graph) {
@@ -380,6 +423,9 @@ function autoLayoutBuilderGraph(graph) {
     return { ...node, x, y };
   });
 
+  // Post-render normalization (DOM-measured heights) is applied in FlowCanvas via
+  // normalizeNodesWithMeasuredHeights(). autoLayoutBuilderGraph only assigns the initial
+  // rough column/row positions; FlowCanvas corrects overlap after first render.
   return { nodes: laidOut, edges };
 }
 
@@ -529,13 +575,9 @@ function computeFitViewport(nodes, wrapEl, padding) {
 const portPos = (node, portId) => {
   const h = nodeHeight(node);
   if (portId === 'in') {
-    if (node.type === 'definition') return { x: node.x, y: node.y + 150 };
-    if (node.type === 'people') return { x: node.x, y: node.y + h / 2 };
     return { x: node.x, y: node.y + h / 2 };
   }
   if (portId === 'out') {
-    if (node.type === 'definition') return { x: node.x + NODE_W, y: node.y + 150 };
-    if (node.type === 'people') return { x: node.x + NODE_W, y: node.y + h / 2 };
     return { x: node.x + NODE_W, y: node.y + h / 2 };
   }
   const idx = node.answers?.findIndex(a => a.id === portId);

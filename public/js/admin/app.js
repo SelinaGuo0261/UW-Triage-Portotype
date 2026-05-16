@@ -9,7 +9,6 @@ function App() {
   const [collaborators, setCollaborators] = useState([]);
   const [activeNav, setActiveNav] = useState('builder');
   const [page, setPage] = useState('library'); // 'library' | 'canvas'
-  const [saveStatus, setSaveStatus] = useState('');
   const [allNodes, setAllNodes] = useState([]);
   const [flowDescription, setFlowDescription] = useState('');
   const [activeBackendFlow, setActiveBackendFlow] = useState(null);
@@ -21,7 +20,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [sidebarDragWidth, setSidebarDragWidth] = useState(null);
-  const saveTimer = useRef(null);
+  const scratchIdRef = useRef(null);
   const sidebarResizeStart = useRef(null);
   const sidebarDragWidthRef = useRef(null);
   const toastTimerRef = useRef(null);
@@ -58,7 +57,7 @@ function App() {
       creatorInitials: 'AI',
       modified,
       created: flow.createdAt ? new Date(flow.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
-      status: flow.status === 'PUBLISHED' ? 'published' : 'draft',
+      status: flow.status === 'PUBLISHED' && flow.publishScope === 'PUBLIC' ? 'published' : 'draft',
       nodes: graph.nodes,
       edges: graph.edges,
       backendFlow: flow,
@@ -77,7 +76,34 @@ function App() {
         if (!res.ok) throw new Error(data.error || 'Failed to load flows');
         if (!trashRes.ok) throw new Error(trashData.error || 'Failed to load trash');
         if (alive) {
-          setGeneratedFlowCards((data.flows || []).map((flow) => flowToCard(flow)));
+          const rawBackendCards = (data.flows || []).map((flow) => flowToCard(flow));
+          const localResult = await storageAdapter.loadAllFlows();
+          const localDataById = {};
+          for (const f of (localResult.data || [])) { if (f?.id) localDataById[f.id] = f; }
+          // Attach any existing localStorage draft to each backend card so onOpen can load it.
+          const backendCards = rawBackendCards.map(card =>
+            localDataById[card.id] ? { ...card, localDraft: localDataById[card.id] } : card
+          );
+          const backendIds = new Set(backendCards.map(c => c.id));
+          // Rehydrate local-only scratch drafts from localStorage.
+          const localCards = (localResult.data || [])
+            .filter(f => f.isLocal && !backendIds.has(f.id))
+            .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+            .map(f => ({
+              id: f.id,
+              name: f.name || 'Untitled Flow',
+              creator: 'You',
+              creatorInitials: 'ME',
+              modified: 'local draft',
+              created: f.savedAt ? new Date(f.savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+              status: 'draft',
+              nodes: f.graph?.nodes || [],
+              edges: f.graph?.edges || [],
+              backendFlow: null,
+              isLocal: true,
+              localDraft: f,
+            }));
+          setGeneratedFlowCards([...backendCards, ...localCards]);
           setTrashedFlowCards((trashData.flows || []).map((flow) => flowToCard(flow)));
         }
       } catch (error) {
@@ -88,6 +114,7 @@ function App() {
     return () => { alive = false; };
   }, [flowToCard, pushToast]);
   const handleGeneratedFlow = useCallback((flow) => {
+    scratchIdRef.current = null;
     const graph = backendFlowToBuilderGraph(flow);
     setActiveBackendFlow(flow);
     setActiveGraph(graph);
@@ -142,28 +169,67 @@ function App() {
       pushToast(error.message || 'Publish failed');
     }
   }, [activeBackendFlow, activeGraph, currentGraph, flowDescription, flowTitle, flowToCard, pushToast]);
+
+  const handleUnpublishFlow = useCallback(async () => {
+    if (!activeBackendFlow) return;
+    try {
+      // Use the existing /publish endpoint with INTERNAL scope — hides the flow from the
+      // researcher portal (knowledge-base only serves PUBLIC snapshots) without a new route.
+      const res = await fetch(`${API_BASE}/flows/${activeBackendFlow.id}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publishScope: 'INTERNAL' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Unpublish failed');
+      setActiveBackendFlow(data.flow);
+      setGeneratedFlowCards((cards) => [
+        flowToCard(data.flow, 'just now'),
+        ...cards.filter((card) => card.id !== data.flow.id),
+      ]);
+      pushToast('Flow removed from researcher portal');
+    } catch (error) {
+      pushToast(error.message || 'Unpublish failed');
+    }
+  }, [activeBackendFlow, flowToCard, pushToast]);
+
   const handleMoveToTrash = useCallback(async (card) => {
-    if (!card?.backendFlow) return;
-    const confirmed = window.confirm(`Move "${card.name}" to Trash? If it is published, it will be removed from the researcher portal.`);
+    const confirmed = window.confirm(`Move "${card.name}" to Trash?${card.status === 'published' ? ' It will be removed from the researcher portal.' : ''}`);
     if (!confirmed) return;
     try {
-      const res = await fetch(`${API_BASE}/flows/${card.backendFlow.id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Move to trash failed');
-      setGeneratedFlowCards((cards) => cards.filter((item) => item.id !== card.id));
-      if (data.flow) {
-        setTrashedFlowCards((cards) => [
-          flowToCard(data.flow, 'just now'),
-          ...cards.filter((item) => item.id !== card.id),
-        ]);
+      if (card.backendFlow) {
+        // AI / backend flow: call the DELETE API, then move to the trash list.
+        const res = await fetch(`${API_BASE}/flows/${card.backendFlow.id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Move to trash failed');
+        setGeneratedFlowCards((cards) => cards.filter((item) => item.id !== card.id));
+        if (data.flow) {
+          setTrashedFlowCards((cards) => [
+            flowToCard(data.flow, 'just now'),
+            ...cards.filter((item) => item.id !== card.id),
+          ]);
+        }
+        if (activeBackendFlow?.id === card.backendFlow.id) {
+          setActiveBackendFlow(null);
+          setActiveGraph(null);
+          setCurrentGraph({ nodes: [], edges: [] });
+          setSelection(null);
+          setPage('library');
+        }
+      } else {
+        // Scratch / local-only flow: no backend record — remove from state only.
+        setGeneratedFlowCards((cards) => cards.filter((item) => item.id !== card.id));
+        if (scratchIdRef.current === card.id) {
+          scratchIdRef.current = null;
+          setActiveBackendFlow(null);
+          setActiveGraph(null);
+          setCurrentGraph({ nodes: [], edges: [] });
+          setSelection(null);
+          setPage('library');
+        }
       }
-      if (activeBackendFlow?.id === card.backendFlow.id) {
-        setActiveBackendFlow(null);
-        setActiveGraph(null);
-        setCurrentGraph({ nodes: [], edges: [] });
-        setSelection(null);
-        setPage('library');
-      }
+      // Remove the autosave draft from localStorage for both flow types.
+      await storageAdapter.remove(resolveFlowStorageKey(card.id));
       pushToast('Moved to Trash');
     } catch (error) {
       pushToast(error.message || 'Move to trash failed');
@@ -195,12 +261,50 @@ function App() {
     }
   }, [activeBackendFlow, flowToCard, pushToast]);
 
-  useEffect(() => {
-    setSaveStatus('Saving…');
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => setSaveStatus('Saved · just now'), 700);
-  }, [flowTitle]);
+  // ── Autosave ────────────────────────────────────────────────
+  const activeFlowId = activeBackendFlow?.id || scratchIdRef.current;
+  const isLocalFlow = !activeBackendFlow && !!scratchIdRef.current;
+  const { saveStatus, flushSave } = useSaveManager({
+    flowId: activeFlowId,
+    flowTitle,
+    flowDescription,
+    graph: currentGraph,
+    isLocal: isLocalFlow,
+  });
+  const SAVE_STATUS_LABEL = {
+    saving: 'Saving…',
+    saved: 'Saved · just now',
+    error: 'Save failed',
+    quota: 'Storage full — export your work',
+  };
 
+  // Bug 2 fix: reload card metadata from storage every time the library view mounts.
+  // Works together with Bug 1: flushSave() on Back ensures the write lands before this read.
+  useEffect(() => {
+    if (page !== 'library' || activeNav !== 'builder') return;
+    async function refreshLibrary() {
+      const result = await storageAdapter.loadAllFlows();
+      if (!result.ok || !result.data?.length) return;
+      const savedById = {};
+      for (const f of result.data) { if (f?.id) savedById[f.id] = f; }
+      setGeneratedFlowCards(cards => cards.map(card => {
+        const saved = savedById[card.id];
+        if (!saved) return card;
+        const timeStr = saved.savedAt
+          ? new Date(saved.savedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+          : null;
+        return {
+          ...card,
+          name: saved.name || card.name,
+          modified: timeStr ? `saved · ${timeStr}` : card.modified,
+          localDraft: saved,   // set for ALL cards so onOpen can restore AI-flow drafts too
+        };
+      }));
+    }
+    refreshLibrary();
+  }, [page, activeNav]);
+
+  const isPublished = activeBackendFlow?.publishScope === 'PUBLIC';
   const showCanvas = activeNav === 'builder' && page === 'canvas';
   const sidebarExpandedWidth = 220;
   const sidebarCollapsedWidth = 56;
@@ -308,17 +412,27 @@ function App() {
                 onClick={() => {
                   setActiveNav('builder');
                   if (f.backendFlow) {
+                    scratchIdRef.current = null;
                     setActiveBackendFlow(f.backendFlow);
-                    const graph = backendFlowToBuilderGraph(f.backendFlow);
+                    const graph = f.localDraft?.graph || backendFlowToBuilderGraph(f.backendFlow);
                     setActiveGraph(graph);
                     setCurrentGraph(graph);
+                    setFlowDescription(f.localDraft?.description ?? f.backendFlow.description ?? '');
+                  } else if (f.isLocal) {
+                    scratchIdRef.current = f.id;
+                    setActiveBackendFlow(null);
+                    const graph = f.localDraft?.graph || { nodes: [], edges: [] };
+                    setActiveGraph(graph);
+                    setCurrentGraph(graph);
+                    setFlowDescription(f.localDraft?.description || '');
                   } else {
+                    scratchIdRef.current = null;
                     setActiveBackendFlow(null);
                     setActiveGraph(null);
                     setCurrentGraph({ nodes: [], edges: [] });
+                    setFlowDescription('');
                   }
-                  setFlowTitle(f.name);
-                  setFlowDescription(f.backendFlow?.description || '');
+                  setFlowTitle(f.localDraft?.name || f.name);
                   setPage('canvas');
                 }}>
                 <span className="nav-flow-dot" style={{ background: f.status === 'PUBLISHED' ? 'var(--accent-green)' : 'var(--ink-400)' }} />
@@ -353,20 +467,56 @@ function App() {
             flows={generatedFlowCards}
             onOpen={(f) => {
               if (f.backendFlow) {
+                scratchIdRef.current = null;
                 setActiveBackendFlow(f.backendFlow);
-                const graph = backendFlowToBuilderGraph(f.backendFlow);
+                // Prefer the locally-saved draft (captures edits autosaved since last publish).
+                const graph = f.localDraft?.graph || backendFlowToBuilderGraph(f.backendFlow);
                 setActiveGraph(graph);
                 setCurrentGraph(graph);
+                setFlowDescription(f.localDraft?.description ?? f.backendFlow.description ?? '');
+              } else if (f.isLocal) {
+                scratchIdRef.current = f.id;
+                setActiveBackendFlow(null);
+                const graph = f.localDraft?.graph || { nodes: [], edges: [] };
+                setActiveGraph(graph);
+                setCurrentGraph(graph);
+                setFlowDescription(f.localDraft?.description || '');
               } else {
+                scratchIdRef.current = null;
                 setActiveBackendFlow(null);
                 setActiveGraph(null);
                 setCurrentGraph({ nodes: [], edges: [] });
+                setFlowDescription('');
               }
-              setFlowTitle(f.name);
-              setFlowDescription(f.backendFlow?.description || '');
+              setFlowTitle(f.localDraft?.name || f.name);
               setPage('canvas');
             }}
-            onScratch={() => { setActiveBackendFlow(null); setActiveGraph(null); setCurrentGraph({ nodes: [], edges: [] }); setFlowTitle('Untitled Flow'); setPage('canvas'); }}
+            onScratch={() => {
+              const scratchId = 'local_' + Date.now();
+              scratchIdRef.current = scratchId;
+              const scratchCard = {
+                id: scratchId,
+                name: 'Untitled Flow',
+                creator: 'You',
+                creatorInitials: 'ME',
+                modified: 'just now',
+                created: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+                status: 'draft',
+                nodes: [],
+                edges: [],
+                backendFlow: null,
+                isLocal: true,
+                localDraft: null,
+              };
+              setGeneratedFlowCards(cards => [scratchCard, ...cards.filter(c => c.id !== scratchId)]);
+              setActiveBackendFlow(null);
+              setActiveGraph(null);
+              setCurrentGraph({ nodes: [], edges: [] });
+              setFlowTitle('Untitled Flow');
+              setFlowDescription('');
+              setPage('canvas');
+              setActiveNav('builder');
+            }}
             toast={pushToast}
             onGenerated={handleGeneratedFlow}
             onMoveToTrash={handleMoveToTrash}
@@ -382,15 +532,19 @@ function App() {
         {showCanvas && (
           <>
             <div className="canvas-header">
-              <button className="back-btn" onClick={() => setPage('library')} title="Back to library">
+              <button className="back-btn" onClick={() => { flushSave(); setPage('library'); }} title="Back to library">
                 <BackIcon />
               </button>
               <div className="flow-title">
                 <input className="flow-title-input" value={flowTitle} onChange={(e) => { if (!preview) setFlowTitle(e.target.value); }} readOnly={preview} />
               </div>
               <div className="flow-meta">
-                <span className="dot-sep" /><span>Draft · v3</span><span className="dot-sep" />
-                <div className="save-status"><span className="save-dot" />{saveStatus}</div>
+                {SAVE_STATUS_LABEL[saveStatus] && (
+                  <div className={`save-status ${saveStatus}`}>
+                    <span className="save-dot" />
+                    {SAVE_STATUS_LABEL[saveStatus]}
+                  </div>
+                )}
               </div>
               <div className="header-right">
                 {preview ? (
@@ -408,7 +562,9 @@ function App() {
                     </div>
                     <button className="btn btn-secondary" onClick={() => setInviteOpen(true)}><Icon.Share /> Share</button>
                     <button className="btn btn-secondary" style={{ gap: 6 }} onClick={() => setPreview(true)} title="Preview flow"><Icon.Play /> Preview</button>
-                    <button className="btn btn-primary" onClick={() => setPublishOpen(true)}><Icon.Globe /> Publish</button>
+                    <button className="btn btn-primary" onClick={() => setPublishOpen(true)} title={isPublished ? 'Re-publish to update researcher portal' : 'Publish to researcher portal'}>
+                      <Icon.Globe /> {isPublished ? 'Republish' : 'Publish to Production'}
+                    </button>
                   </>
                 )}
               </div>
@@ -437,7 +593,7 @@ function App() {
 
       {/* Modals */}
       <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} collaborators={collaborators} setCollaborators={setCollaborators} toast={pushToast} />
-      <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} issues={issuesData.issues} onPublish={handlePublishFlow} />
+      <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} issues={issuesData.issues} onPublish={handlePublishFlow} isPublished={isPublished} onUnpublish={handleUnpublishFlow} />
 
       {/* Toasts */}
       <div className="toast-wrap">

@@ -159,12 +159,13 @@ function AssigneeField({ node, onUpdate }) {
   );
 }
 
-function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplicate, onStartConn, onFinishConn, onOpenMenu, hoverPort, setHoverPort, pendingConn, edges, readOnly }) {
+function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplicate, onStartConn, onFinishConn, onOpenMenu, hoverPort, setHoverPort, pendingConn, edges, readOnly, registerPort, onNodeMount }) {
   const isConnectedAsSource = (portId) => edges.some(e => e.from === node.id && e.fromPort === portId);
   const isConnectedAsTarget = (portId) => edges.some(e => e.to === node.id && e.toPort === portId);
 
   const Port = ({ id, className }) => readOnly ? null : (
     <div
+      ref={(el) => registerPort && registerPort(node.id, id, el)}
       className={`port ${className} ${isConnectedAsSource(id) || isConnectedAsTarget(id) ? 'connected' : ''} ${hoverPort?.node === node.id && hoverPort?.port === id ? 'hot' : ''}`}
       onPointerDown={(e) => { if (className === 'output') onStartConn(e, node, id); }}
       onPointerUp={(e) => { if (pendingConn && className === 'input') onFinishConn(e, node, id); }}
@@ -177,6 +178,7 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
   if (node.type === 'definition') {
     return (
       <div
+        ref={(el) => onNodeMount?.(node.id, el)}
         className={`node ${selected ? 'selected' : ''}`}
         style={{ left: node.x, top: node.y, width: NODE_W, borderLeft: '3px solid oklch(0.52 0.12 200)' }}
         onPointerDown={onPointerDown}
@@ -220,6 +222,7 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
     const isHidden = node.hiddenFromResearchers;
     return (
       <div
+        ref={(el) => onNodeMount?.(node.id, el)}
         className={`node ${selected ? 'selected' : ''}`}
         style={{ left: node.x, top: node.y, width: NODE_W, ...(isHidden ? { border: '1.5px dashed var(--ink-300)', boxShadow: 'none' } : {}) }}
         onPointerDown={onPointerDown}
@@ -255,6 +258,7 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
 
   return (
     <div
+      ref={(el) => onNodeMount?.(node.id, el)}
       className={`node ${selected ? 'selected' : ''}`}
       style={{ left: node.x, top: node.y, width: NODE_W }}
       onPointerDown={onPointerDown}
@@ -291,6 +295,17 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
         <div className="node-answers">
           {node.answers.map((a, i) => (
             <div key={a.id} className="node-answer">
+              {/* Port dot inside the answer section — CSS top:50% tracks the section's rendered center */}
+              {!readOnly && (
+                <div
+                  ref={(el) => registerPort && registerPort(node.id, a.id, el)}
+                  className={`port output ${isConnectedAsSource(a.id) ? 'connected' : ''} ${hoverPort?.node === node.id && hoverPort?.port === a.id ? 'hot' : ''}`}
+                  style={{ position: 'absolute', right: '-7px', top: '50%', transform: 'translateY(-50%)' }}
+                  onPointerDown={(e) => onStartConn(e, node, a.id)}
+                  onPointerEnter={() => setHoverPort({ node: node.id, port: a.id })}
+                  onPointerLeave={() => setHoverPort(null)}
+                />
+              )}
               <div className="node-answer-main">
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, fontWeight: 700, color: 'var(--purple-700)', background: 'var(--purple-100)', borderRadius: 3, padding: '1px 4px', flexShrink: 0, lineHeight: 1.4 }}>{i + 1}</span>
                 <textarea className="answer-input" readOnly={readOnly} value={a.label} onChange={(e) => onUpdate({ answers: node.answers.map(x => x.id === a.id ? { ...x, label: e.target.value } : x) })} onPointerDown={(e) => e.stopPropagation()} placeholder="Answer label" rows={1} />
@@ -331,17 +346,6 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
           </button>}
         </div>
       )}
-      {/* Answer ports — same vertical center as portPos() via decisionPortLocalCenterY */}
-      {!readOnly && node.type === 'decision' && node.answers.map((a, i) => (
-        <div
-          key={`pt-${a.id}`}
-          className={`port output ${isConnectedAsSource(a.id) ? 'connected' : ''} ${hoverPort?.node === node.id && hoverPort?.port === a.id ? 'hot' : ''}`}
-          style={{ right: '-7px', top: `${decisionPortLocalCenterY(node, i)}px`, transform: 'translateY(-50%)' }}
-          onPointerDown={(e) => onStartConn(e, node, a.id)}
-          onPointerEnter={() => setHoverPort({ node: node.id, port: a.id })}
-          onPointerLeave={() => setHoverPort(null)}
-        />
-      ))}
 
       {node.type === 'action' && (
         <div className="node-action-body" style={{ paddingBottom: 0 }}>
@@ -475,6 +479,87 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   const nodesRef = useRef(nodes);
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   const savedViewportRef = useRef(null);
+  const portElsRef = useRef({});
+  const portPosCacheRef = useRef({});
+  const [, forceUpdate] = useReducer(x => x + 1, 0);
+
+  const registerPort = useCallback((nodeId, portId, el) => {
+    const key = nodeId + ':' + portId;
+    if (el) portElsRef.current[key] = el;
+    else delete portElsRef.current[key];
+  }, []);
+
+  // After each render, measure actual port positions from the DOM and cache canvas-space coords.
+  // useLayoutEffect runs before the browser paints, so forceUpdate() causes a synchronous
+  // re-render with correct positions — users never see the formula-based positions.
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const newCache = {};
+    let changed = false;
+    Object.entries(portElsRef.current).forEach(function(entry) {
+      const key = entry[0], el = entry[1];
+      if (!el || !el.isConnected) return;
+      const r = el.getBoundingClientRect();
+      const x = (r.left + r.width / 2 - wrapRect.left - pan.x) / zoom;
+      const y = (r.top + r.height / 2 - wrapRect.top - pan.y) / zoom;
+      newCache[key] = { x: x, y: y };
+      const prev = portPosCacheRef.current[key];
+      if (!prev || Math.abs(prev.x - x) > 0.5 || Math.abs(prev.y - y) > 0.5) changed = true;
+    });
+    if (changed) { portPosCacheRef.current = newCache; forceUpdate(); }
+  }, [nodes]);  // re-measure whenever node content / positions change
+
+  // Returns measured canvas-space center of a port dot; falls back to formula if not yet measured.
+  const getDomPortPos = useCallback(function(node, portId) {
+    return portPosCacheRef.current[node.id + ':' + portId] || portPos(node, portId);
+  }, []);
+
+  // ── DOM-measured layout normalization ────────────────────────────────────────
+  // nodeElsRef stores the .node DOM element for each node so we can read el.offsetHeight.
+  const nodeElsRef = useRef({});
+  const hasNormalizedRef = useRef(false);
+
+  // Reset the "has normalized" flag whenever a new graph loads, so each AI-generated
+  // flow gets its own normalization pass.
+  useEffect(() => { hasNormalizedRef.current = false; }, [graph]);
+
+  const registerNodeEl = useCallback(function(nodeId, el) {
+    if (el) nodeElsRef.current[nodeId] = el;
+    else delete nodeElsRef.current[nodeId];
+  }, []);
+
+  // After every render, attempt a single normalization pass using ONLY el.offsetHeight.
+  // No formulas, no constants, no per-type values.
+  useLayoutEffect(function() {
+    if (hasNormalizedRef.current) return;    // run once per graph load
+    if (readOnly) return;                    // skip in preview mode
+    if (!nodes.length) return;
+
+    const heightsById = {};
+    let allMeasured = true;
+    nodes.forEach(function(n) {
+      const el = nodeElsRef.current[n.id];
+      if (el && el.isConnected && el.offsetHeight > 0) {
+        heightsById[n.id] = el.offsetHeight;
+      } else {
+        allMeasured = false;
+      }
+    });
+
+    // Diagnostic — visible in browser console; shows the raw rendered heights.
+    console.log('[DIAGNOSTIC] node heights after render:', nodes.map(function(n) {
+      return { id: n.id.slice(-6), type: n.type, offsetHeight: heightsById[n.id] ?? 'NOT MEASURED' };
+    }));
+
+    if (!allMeasured) return;  // wait for all nodes to be in the DOM
+
+    hasNormalizedRef.current = true;
+    const normalized = normalizeNodesWithMeasuredHeights(nodes, heightsById);
+    setNodes(normalized);
+  }, [nodes, readOnly]);  // re-runs until allMeasured, then hasNormalizedRef gates it
+
   const [animating, setAnimating] = useState(false);
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showManagePeople, setShowManagePeople] = useState(false);
@@ -672,7 +757,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   const startConn = (e, node, portId) => {
     if (readOnly) return;
     e.stopPropagation();
-    const p = portPos(node, portId);
+    const p = getDomPortPos(node, portId);
     setPendingConn({ fromNode: node.id, fromPort: portId, cursor: p });
     wrapRef.current.classList.add('connecting');
   };
@@ -755,7 +840,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
   const edgeEls = edges.map(e => {
     const a = nodeMap[e.from], b = nodeMap[e.to];
     if (!a || !b) return null;
-    const p1 = portPos(a, e.fromPort), p2 = portPos(b, e.toPort);
+    const p1 = getDomPortPos(a, e.fromPort), p2 = getDomPortPos(b, e.toPort);
     const d = bezier(p1, p2);
     const isSel = selected?.type === 'edge' && selected.id === e.id;
     let label = '';
@@ -791,7 +876,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
           {pendingConn && (() => {
             const fn = nodeMap[pendingConn.fromNode];
             if (!fn) return null;
-            const p1 = portPos(fn, pendingConn.fromPort);
+            const p1 = getDomPortPos(fn, pendingConn.fromPort);
             return <path className="edge-preview" d={bezier(p1, pendingConn.cursor)} />;
           })()}
         </svg>
@@ -838,6 +923,8 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
             pendingConn={pendingConn}
             edges={edges}
             readOnly={readOnly}
+            registerPort={registerPort}
+            onNodeMount={registerNodeEl}
           />
         ))}
       </div>
@@ -1450,7 +1537,7 @@ function InviteModal({ open, onClose, collaborators, setCollaborators, toast }) 
   );
 }
 
-function PublishModal({ open, onClose, issues, onPublish }) {
+function PublishModal({ open, onClose, issues, onPublish, isPublished, onUnpublish }) {
   if (!open) return null;
   const errs = issues.filter(i => i.level === 'err');
   const warns = issues.filter(i => i.level === 'warn');
@@ -1484,6 +1571,19 @@ function PublishModal({ open, onClose, issues, onPublish }) {
             <Icon.Globe /> Publish to production
           </button>
         </div>
+        {isPublished && onUnpublish && (
+          <div style={{ padding: '10px 20px 14px', borderTop: '1px solid var(--ink-200)', borderRadius: '0 0 12px 12px', background: 'oklch(0.99 0.005 25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-700)', marginBottom: 2 }}>Currently live on researcher portal</div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>Unpublishing hides this flow from researchers but keeps all draft data.</div>
+              </div>
+              <button className="btn btn-danger" style={{ flexShrink: 0 }} onClick={() => { onUnpublish(); onClose(); }}>
+                <Icon.EyeOff /> Unpublish
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

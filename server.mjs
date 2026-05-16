@@ -1535,6 +1535,18 @@ async function handleApi(req, res, url) {
     return send(res, 200, { flow, snapshot });
   }
 
+  const unpublishMatch = url.pathname.match(/^\/api\/flows\/([^/]+)\/unpublish$/);
+  if (req.method === 'POST' && unpublishMatch) {
+    const flow = db.flows.find((f) => f.id === unpublishMatch[1]);
+    if (!flow) return send(res, 404, { error: 'Flow not found.' });
+    flow.publishScope = null;
+    flow.status = FlowStatus.DRAFT;
+    flow.updatedAt = now();
+    db.publishedSnapshots = db.publishedSnapshots.filter((s) => s.flowId !== flow.id);
+    await writeDb(db);
+    return send(res, 200, { flow });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/knowledge-base') {
     const publicSnapshots = db.publishedSnapshots.filter((s) => s.publishScope === PublishScope.PUBLIC);
     const items = publicSnapshots.map((s) => ({
