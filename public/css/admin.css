@@ -84,7 +84,7 @@ input, textarea { font-family: inherit; color: inherit; }
 }
 .brand-sub { color: var(--ink-500); font-weight: 500; padding-left: 14px; margin-left: 4px; border-left: 1px solid var(--ink-300); font-size: 12.5px; }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.top-search { display: flex; align-items: center; gap: 8px; background: var(--ink-100); border: 1px solid var(--ink-200); padding: 6px 12px; border-radius: 6px; font-size: 12.5px; color: var(--ink-500); width: 240px; }
+.top-search { display: flex; align-items: center; gap: 8px; background: var(--ink-100); border: 1px solid var(--ink-200); padding: 6px 12px; border-radius: 6px; font-size: 12.5px; color: var(--ink-500); width: 240px; min-width: 0; flex-shrink: 1; }
 .top-search kbd { margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; background: white; border: 1px solid var(--ink-300); padding: 1px 5px; border-radius: 3px; color: var(--ink-500); }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--purple-500), var(--purple-700)); color: white; display: grid; place-items: center; font-size: 11px; font-weight: 600; }
 .icon-btn { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-700); transition: background 0.12s; }
@@ -153,23 +153,23 @@ input, textarea { font-family: inherit; color: inherit; }
 
 /* MAIN / CANVAS */
 .main { grid-area: main; display: flex; flex-direction: column; background: var(--canvas-bg); min-width: 0; min-height: 0; position: relative; }
-.canvas-header { display: flex; align-items: center; padding: 12px 20px; background: white; border-bottom: 1px solid var(--ink-200); gap: 12px; flex-shrink: 0; }
-.flow-title { font-family: var(--font-headline); font-size: 15px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
-.flow-title-input { font-family: var(--font-headline); border: none; background: transparent; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; padding: 4px 6px; border-radius: 4px; width: 260px; outline: none; }
+.canvas-header { display: flex; align-items: center; padding: 12px 20px; background: white; border-bottom: 1px solid var(--ink-200); gap: 12px; flex-shrink: 0; min-width: 0; }
+.flow-title { font-family: var(--font-headline); font-size: 15px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; flex: 1 1 260px; min-width: 0; max-width: 460px; }
+.flow-title-input { font-family: var(--font-headline); border: none; background: transparent; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; padding: 4px 6px; border-radius: 4px; flex: 1 1 auto; width: 100%; min-width: 0; outline: none; text-overflow: ellipsis; }
 .flow-title-input:hover { background: var(--ink-100); }
 .flow-title-input:focus { background: var(--ink-100); box-shadow: inset 0 0 0 1px var(--purple-500); }
-.flow-meta { color: var(--ink-500); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.flow-meta { color: var(--ink-500); font-size: 12px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .dot-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-400); }
 .save-status { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 500; color: var(--ink-400); }
 .save-status.saving { color: var(--ink-400); }
 .save-status.saved { color: var(--accent-green); }
 .save-status.error, .save-status.quota { color: var(--accent-red); }
 .save-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .collabs { display: flex; margin-right: 4px; }
 .collab { width: 26px; height: 26px; border-radius: 50%; border: 2px solid white; display: grid; place-items: center; font-size: 10px; font-weight: 600; color: white; margin-left: -6px; cursor: pointer; }
 .collab:first-child { margin-left: 0; }
-.btn { padding: 7px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: all 0.12s; cursor: pointer; }
+.btn { padding: 7px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: all 0.12s; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 .btn-secondary { background: white; border: 1px solid var(--ink-300); color: var(--ink-900); }
 .btn-secondary:hover { border-color: var(--purple-500); color: var(--purple-700); }
 .btn-primary { background: var(--purple-700); color: white; font-weight: 600; }
@@ -824,3 +824,33 @@ input, textarea { font-family: inherit; color: inherit; }
 /* Canvas back button */
 .back-btn { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--ink-700); border: 1px solid var(--ink-200); background: white; cursor: pointer; margin-right: 4px; transition: all 0.12s; flex-shrink: 0; }
 .back-btn:hover { border-color: var(--purple-400); color: var(--purple-800); background: var(--purple-50); }
+
+/* ── Responsive breakpoints ──────────────────────────────
+   Admin is a desktop tool; these rules target small laptops
+   and tablet-landscape so the canvas + right panel stay usable.
+   The sidebar width is set inline via --sidebar-w from app.js
+   (user can drag/collapse), so we only adjust right panel +
+   absolute-positioned canvas chrome here. */
+@media (max-width: 1100px) {
+  .app { grid-template-columns: var(--sidebar-w) 1fr 240px; }
+  .rightpanel { width: 240px; }
+  /* Push zoom controls above the bottom toolbar to avoid overlap */
+  .zoom-controls { bottom: 64px; }
+  .canvas-header { padding: 12px 14px; gap: 10px; }
+  /* Reclaim space for the title: collapse save-status text to just the dot */
+  .save-status span:not(.save-dot) { display: none; }
+  .save-status { gap: 0; }
+  /* Trim the collaborator avatars row */
+  .collabs { display: none; }
+  /* Shorten the long "Publish to Production" label */
+  .btn-label-suffix { display: none; }
+  /* Slightly tighter buttons to free up header space for the title */
+  .btn { padding: 7px 11px; }
+}
+@media (max-width: 940px) {
+  .app { grid-template-columns: var(--sidebar-w) 1fr 220px; }
+  .rightpanel { width: 220px; }
+  /* Hide the cosmetic search box and brand subtitle; topbar-right keeps its margin-left:auto */
+  .top-search { display: none; }
+  .brand-sub { display: none; }
+}
