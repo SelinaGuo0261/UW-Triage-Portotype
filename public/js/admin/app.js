@@ -541,7 +541,7 @@ function App() {
                 {preview ? (
                   <>
                     <span style={{ fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", background: 'oklch(0.92 0.05 155)', color: 'oklch(0.32 0.14 155)', padding: '3px 10px', borderRadius: 10, fontWeight: 600, letterSpacing: '0.06em' }}>PREVIEW</span>
-                    <button className="btn btn-secondary" onClick={() => setPreview(false)}><Icon.X /> Exit Preview</button>
+                    <button className="btn btn-secondary" onClick={() => setPreview(false)} title="Exit preview"><Icon.X /> <span className="btn-label">Exit Preview</span></button>
                   </>
                 ) : (
                   <>
@@ -551,10 +551,10 @@ function App() {
                       ))}
                       {collaborators.length > 3 && <div className="collab" style={{ background: 'var(--ink-300)', color: 'var(--ink-700)' }}>+{collaborators.length - 3}</div>}
                     </div>
-                    <button className="btn btn-secondary" onClick={() => setInviteOpen(true)}><Icon.Share /> Share</button>
-                    <button className="btn btn-secondary" style={{ gap: 6 }} onClick={() => setPreview(true)} title="Preview flow"><Icon.Play /> Preview</button>
+                    <button className="btn btn-secondary" onClick={() => setInviteOpen(true)} title="Share flow"><Icon.Share /> <span className="btn-label">Share</span></button>
+                    <button className="btn btn-secondary" style={{ gap: 6 }} onClick={() => setPreview(true)} title="Preview flow"><Icon.Play /> <span className="btn-label">Preview</span></button>
                     <button className="btn btn-primary" onClick={() => setPublishOpen(true)} title={isPublished ? 'Re-publish to update researcher portal' : 'Publish to researcher portal'}>
-                      <Icon.Globe /> {isPublished ? 'Republish' : (<>Publish<span className="btn-label-suffix"> to Production</span></>)}
+                      <Icon.Globe /> <span className="btn-label">{isPublished ? 'Republish' : (<>Publish<span className="btn-label-suffix"> to Production</span></>)}</span>
                     </button>
                   </>
                 )}
