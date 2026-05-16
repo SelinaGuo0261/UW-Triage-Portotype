@@ -3,12 +3,16 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const WordExtractorCtor = require('word-extractor');
+
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 3100);
@@ -989,13 +993,78 @@ async function restateSourceTextForFile2flow(fullSource, config) {
   return { restatedText, prompt, rawAi, skipped: false };
 }
 
+function clampSuggestedFlowTitle(s) {
+  let t = String(s || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  t = t.replace(/^[\s"'“”‘’`]+|[\s"'“”‘’`]+$/g, '');
+  if (t.length > 120) t = `${t.slice(0, 117)}...`;
+  return t;
+}
+
+/** First non-empty line from model output; strips bullets / wrapping quotes. */
+function parseFlowTitleFromAiResponse(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  let line = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith('#'));
+  if (!line) return '';
+  line = line.replace(/^[-*•]\s*/, '').replace(/^\d+[.)]\s+/, '');
+  const tick = line.match(/^`([^`]+)`$/);
+  if (tick) line = tick[1];
+  return clampSuggestedFlowTitle(line);
+}
+
+/**
+ * After restatement: short list-friendly flow name with document-type keywords.
+ * @returns {Promise<{ title: string|null, prompt: string, rawAi: string|null }>}
+ */
+async function suggestFlowTitleFromRestatement(restatedText, input, config) {
+  const source = String(restatedText || '').trim();
+  const tpl = await loadFile2flowPrompt('01b-flow-title-from-restatement.md');
+  const prompt = fillFile2flowPromptPlaceholders(tpl, {
+    DRAFT_TITLE: String(input.name || '').trim(),
+    SOURCE_FILE: String(input.sourceFile || '').trim(),
+    RESTATED_TEXT: source.slice(0, 12000),
+  });
+  const rawAi = await callAi(prompt, config);
+  const title = parseFlowTitleFromAiResponse(rawAi) || null;
+  return { title, prompt, rawAi };
+}
+
 async function generateGraph(input, debugFile2flow = false) {
   const fullSource = String(input.sourceText || '');
   const config = requireAiConfig();
 
   const restatement = await restateSourceTextForFile2flow(fullSource, config);
   const pipelineSource = restatement.restatedText;
-  const pipelineInput = { ...input, sourceText: pipelineSource };
+
+  let suggestedFlowTitle = null;
+  let flowTitleBundle = null;
+  if (process.env.AI_SKIP_FLOW_TITLE_FROM_RESTATEMENT === '1') {
+    flowTitleBundle = { skipped: true, reason: 'AI_SKIP_FLOW_TITLE_FROM_RESTATEMENT=1' };
+  } else if (!String(pipelineSource || '').trim() || String(pipelineSource).trim().length < 48) {
+    flowTitleBundle = {
+      skipped: true,
+      reason: 'restatedText shorter than 48 characters',
+    };
+  } else {
+    try {
+      flowTitleBundle = await suggestFlowTitleFromRestatement(pipelineSource, input, config);
+      suggestedFlowTitle = flowTitleBundle.title || null;
+    } catch (e) {
+      console.warn('[flow title from restatement]', e?.message || e);
+      flowTitleBundle = { error: String(e?.message || e) };
+    }
+  }
+
+  const pipelineInput = {
+    ...input,
+    sourceText: pipelineSource,
+    name: suggestedFlowTitle || input.name,
+  };
 
   const snap = debugFile2flow
     ? {
@@ -1013,6 +1082,16 @@ async function generateGraph(input, debugFile2flow = false) {
           rawAi: restatement.rawAi,
           restatedText: pipelineSource,
         },
+        step1c_flowTitle: flowTitleBundle
+          ? {
+              skipped: flowTitleBundle.skipped,
+              reason: flowTitleBundle.reason ?? null,
+              error: flowTitleBundle.error ?? null,
+              prompt: flowTitleBundle.prompt ?? null,
+              rawAi: flowTitleBundle.rawAi ?? null,
+              suggestedFlowTitle,
+            }
+          : null,
       }
     : null;
   let preprocessDossier = '';
@@ -1207,6 +1286,12 @@ async function generateGraph(input, debugFile2flow = false) {
       }
     }
     throw normErr;
+  }
+
+  if (suggestedFlowTitle) {
+    normalized.flowName = suggestedFlowTitle;
+    const defNode = normalized.nodes.find((n) => n.type === NodeType.DEFINITION);
+    if (defNode) defNode.label = suggestedFlowTitle;
   }
 
   if (snap) {
@@ -1431,9 +1516,59 @@ function createSnapshot(flow, scope) {
   };
 }
 
+const MAX_EXTRACT_DOC_BYTES = 18 * 1024 * 1024;
+
+/** Browser sends legacy .doc as base64; server uses word-extractor (OLE binary not readable in-browser). */
+async function handleExtractDocText(req, res) {
+  try {
+    const body = await readJson(req);
+    const filename = String(body.filename || 'upload.doc').toLowerCase();
+    const b64 = body.base64;
+    if (!filename.endsWith('.doc')) {
+      return send(res, 400, { error: 'This endpoint only accepts legacy .doc files.' });
+    }
+    if (!b64 || typeof b64 !== 'string') {
+      return send(res, 400, { error: 'Missing base64 document body.' });
+    }
+    const estBytes = Math.floor((b64.length * 3) / 4);
+    if (estBytes > MAX_EXTRACT_DOC_BYTES) {
+      return send(res, 413, { error: 'Document too large for extraction (max ~18 MB).' });
+    }
+    let buf;
+    try {
+      buf = Buffer.from(b64, 'base64');
+    } catch {
+      return send(res, 400, { error: 'Invalid base64.' });
+    }
+    if (buf.length > MAX_EXTRACT_DOC_BYTES) {
+      return send(res, 413, { error: 'Document too large for extraction.' });
+    }
+    try {
+      const Extractor = WordExtractorCtor.default || WordExtractorCtor;
+      const extractor = new Extractor();
+      const extracted = await extractor.extract(buf);
+      const text = String(extracted.getBody() || '').trim();
+      if (!text) {
+        return send(res, 422, { error: 'No readable text in this .doc (empty or unsupported).' });
+      }
+      return send(res, 200, { text });
+    } catch (e) {
+      console.warn('[extract-doc-text] extract', e?.message || e);
+      return send(res, 422, { error: e?.message || 'Failed to read .doc binary.' });
+    }
+  } catch (e) {
+    console.warn('[extract-doc-text]', e?.message || e);
+    return send(res, 500, { error: e?.message || 'Extraction failed.' });
+  }
+}
+
 async function handleApi(req, res, url) {
   if (req.method === 'OPTIONS') return send(res, 204, '');
   const db = await readDb();
+
+  if (req.method === 'POST' && url.pathname === '/api/extract-doc-text') {
+    return handleExtractDocText(req, res);
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/flows') {
     const includeTrash = url.searchParams.get('trash') === '1';

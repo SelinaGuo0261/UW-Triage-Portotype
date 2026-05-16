@@ -407,38 +407,41 @@ function App() {
         <div className="nav-flows-group">
           <div className="nav-section-label">Recent Flows</div>
           <div className="nav-flows-list">
-            {generatedFlowCards.slice(0, 4).map((f, i) => (
-              <div key={f.id || i} className="nav-item nav-flow-item" data-tooltip={f.name} title={sidebarCollapsed ? f.name : ''}
-                onClick={() => {
-                  setActiveNav('builder');
-                  if (f.backendFlow) {
-                    scratchIdRef.current = null;
-                    setActiveBackendFlow(f.backendFlow);
-                    const graph = f.localDraft?.graph || backendFlowToBuilderGraph(f.backendFlow);
-                    setActiveGraph(graph);
-                    setCurrentGraph(graph);
-                    setFlowDescription(f.localDraft?.description ?? f.backendFlow.description ?? '');
-                  } else if (f.isLocal) {
-                    scratchIdRef.current = f.id;
-                    setActiveBackendFlow(null);
-                    const graph = f.localDraft?.graph || { nodes: [], edges: [] };
-                    setActiveGraph(graph);
-                    setCurrentGraph(graph);
-                    setFlowDescription(f.localDraft?.description || '');
-                  } else {
-                    scratchIdRef.current = null;
-                    setActiveBackendFlow(null);
-                    setActiveGraph(null);
-                    setCurrentGraph({ nodes: [], edges: [] });
-                    setFlowDescription('');
-                  }
-                  setFlowTitle(f.localDraft?.name || f.name);
-                  setPage('canvas');
-                }}>
+            {generatedFlowCards.slice(0, 4).map((f, i) => {
+              const openThis = () => {
+                setActiveNav('builder');
+                if (f.backendFlow) {
+                  scratchIdRef.current = null;
+                  setActiveBackendFlow(f.backendFlow);
+                  const graph = f.localDraft?.graph || backendFlowToBuilderGraph(f.backendFlow);
+                  setActiveGraph(graph);
+                  setCurrentGraph(graph);
+                  setFlowDescription(f.localDraft?.description ?? f.backendFlow.description ?? '');
+                } else if (f.isLocal) {
+                  scratchIdRef.current = f.id;
+                  setActiveBackendFlow(null);
+                  const graph = f.localDraft?.graph || { nodes: [], edges: [] };
+                  setActiveGraph(graph);
+                  setCurrentGraph(graph);
+                  setFlowDescription(f.localDraft?.description || '');
+                } else {
+                  scratchIdRef.current = null;
+                  setActiveBackendFlow(null);
+                  setActiveGraph(null);
+                  setCurrentGraph({ nodes: [], edges: [] });
+                  setFlowDescription('');
+                }
+                setFlowTitle(f.localDraft?.name || f.name);
+                setPage('canvas');
+              };
+              return (
+              <div key={f.id || i} className="nav-item nav-flow-item" data-tooltip={f.name}
+                title={sidebarCollapsed ? f.name : ''} role="button" tabIndex={0}
+                onClick={openThis} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openThis(); } }}>
                 <span className="nav-flow-dot" style={{ background: f.status === 'PUBLISHED' ? 'var(--accent-green)' : 'var(--ink-400)' }} />
                 <span className="nav-label" style={{ color: 'var(--ink-700)' }}>{f.name}</span>
               </div>
-            ))}
+              ); })}
           </div>
         </div>
 
@@ -469,7 +472,6 @@ function App() {
               if (f.backendFlow) {
                 scratchIdRef.current = null;
                 setActiveBackendFlow(f.backendFlow);
-                // Prefer the locally-saved draft (captures edits autosaved since last publish).
                 const graph = f.localDraft?.graph || backendFlowToBuilderGraph(f.backendFlow);
                 setActiveGraph(graph);
                 setCurrentGraph(graph);
@@ -495,27 +497,16 @@ function App() {
               const scratchId = 'local_' + Date.now();
               scratchIdRef.current = scratchId;
               const scratchCard = {
-                id: scratchId,
-                name: 'Untitled Flow',
-                creator: 'You',
-                creatorInitials: 'ME',
+                id: scratchId, name: 'Untitled Flow', creator: 'You', creatorInitials: 'ME',
                 modified: 'just now',
                 created: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
-                status: 'draft',
-                nodes: [],
-                edges: [],
-                backendFlow: null,
-                isLocal: true,
-                localDraft: null,
+                status: 'draft', nodes: [], edges: [], backendFlow: null, isLocal: true, localDraft: null,
               };
               setGeneratedFlowCards(cards => [scratchCard, ...cards.filter(c => c.id !== scratchId)]);
-              setActiveBackendFlow(null);
-              setActiveGraph(null);
+              setActiveBackendFlow(null); setActiveGraph(null);
               setCurrentGraph({ nodes: [], edges: [] });
-              setFlowTitle('Untitled Flow');
-              setFlowDescription('');
-              setPage('canvas');
-              setActiveNav('builder');
+              setFlowTitle('Untitled Flow'); setFlowDescription('');
+              setPage('canvas'); setActiveNav('builder');
             }}
             toast={pushToast}
             onGenerated={handleGeneratedFlow}

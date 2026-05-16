@@ -72,6 +72,11 @@ const Icon = {
       <path d="M12 3l1.9 4.7L18.5 9.5l-4.6 1.8L12 16l-1.9-4.7L5.5 9.5l4.6-1.8z"/><path d="M19 14l.7 1.7 1.8.7-1.8.7-.7 1.7-.7-1.7-1.8-.7 1.8-.7z"/>
     </svg>
   ),
+  RefreshCw: (p) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+    </svg>
+  ),
   Dots: (p) => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
       <circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>
@@ -236,7 +241,60 @@ const API_BASE = '/api';
 /**
  * Plain text from an uploaded file for AI / POST /api/flows.
  * .docx is a ZIP of XML — never use File.text() on it (that sends binary garbage to the model).
+ * .pdf uses pdf.js (admin.html). Legacy .doc uses POST /api/extract-doc-text.
  */
+function fileToBase64DataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result || '');
+      const i = s.indexOf(',');
+      resolve(i >= 0 ? s.slice(i + 1) : s);
+    };
+    r.onerror = () => reject(new Error('Could not read file.'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function extractPdfTextWithPdfJs(file) {
+  if (typeof pdfjsLib === 'undefined') {
+    throw new Error('PDF reader failed to load (pdf.js). Check network, refresh the page, or paste text in Description.');
+  }
+  const data = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) });
+  const pdf = await loadingTask.promise;
+  const parts = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const line = tc.items.map((it) => (it && 'str' in it ? it.str : '')).join(' ');
+    parts.push(line);
+  }
+  const text = parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!text) {
+    throw new Error('No extractable text in this PDF (may be image-only). Paste text in Description or use OCR.');
+  }
+  return text;
+}
+
+async function extractLegacyDocViaApi(file) {
+  const base64 = await fileToBase64DataUrl(file);
+  const res = await fetch(`${API_BASE}/extract-doc-text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: file.name || 'upload.doc', base64 }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `Could not read .doc (${res.status}). Save as .docx or paste text.`);
+  }
+  const text = String(data.text || '').trim();
+  if (!text) {
+    throw new Error('No text extracted from .doc. Save as .docx or paste in Description.');
+  }
+  return text;
+}
+
 async function extractUploadTextForAi(file) {
   if (!file) return '';
   const name = (file.name || '').toLowerCase();
@@ -255,10 +313,10 @@ async function extractUploadTextForAi(file) {
     return text;
   }
   if (name.endsWith('.doc')) {
-    throw new Error('Legacy .doc is not supported. Save as .docx or paste text in Description.');
+    return extractLegacyDocViaApi(file);
   }
   if (name.endsWith('.pdf')) {
-    throw new Error('PDF is not extracted in the browser yet. Use .docx / .txt or paste the document text in Description.');
+    return extractPdfTextWithPdfJs(file);
   }
   return file.text();
 }

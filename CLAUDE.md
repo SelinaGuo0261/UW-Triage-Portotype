@@ -242,7 +242,7 @@ normalizeByColumn(flowNodes).concat(peopleNodes)
 
 `POST /api/flows` calls the configured AI provider to generate graph JSON.
 
-Server behavior: File2Flow pipeline with editable prompt templates under `prompts/file2flow/`, compact graph prompt (max 8 nodes, max 4 answers, max 3 materials), OpenAI JSON mode, AI repair pass, local cleanup pass, persistent frontend error display.
+Server behavior: File2Flow pipeline with editable prompt templates under `prompts/file2flow/` (including `01b-flow-title-from-restatement.md` for AI-derived flow titles), compact graph prompt (max 8 nodes, max 4 answers, max 3 materials), OpenAI JSON mode, AI repair pass, local cleanup pass, persistent frontend error display. Supports PDF (via pdf.js), DOCX (mammoth), and legacy .doc (server-side extraction) as input sources.
 
 ## Researcher Wiring
 
