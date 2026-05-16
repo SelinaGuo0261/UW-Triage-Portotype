@@ -319,6 +319,11 @@ input, textarea { font-family: inherit; color: inherit; }
 .rp-badge { background: var(--purple-100); color: var(--purple-800); font-size: 10px; padding: 1px 5px; border-radius: 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rp-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .rp-section-label { font-family: var(--font-subheading); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
+.rp-issues-head { justify-content: space-between; width: 100%; box-sizing: border-box; margin-bottom: 2px; }
+.rp-issues-head-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rp-recheck-icon { width: 28px; height: 28px; flex-shrink: 0; border-radius: 6px; color: var(--ink-600); }
+.rp-recheck-icon:hover { color: var(--purple-700); background: var(--purple-50); }
+.rp-suggestions-head { margin-top: 6px; padding-top: 22px; }
 /* ── InspectSettings ── */
 .inspect-section { display: flex; flex-direction: column; gap: 6px; }
 .inspect-input { width: 100%; box-sizing: border-box; padding: 6px 9px; font-size: 12.5px; font-family: inherit; color: var(--ink-900); background: var(--ink-50); border: 1px solid var(--ink-200); border-radius: 6px; outline: none; transition: border-color 0.12s; }

@@ -1296,26 +1296,37 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
 
 function RightPanel({ issues, suggestions, onGoToNode, onApplySuggestion, toast }) {
   const [dismissed, setDismissed] = useState(new Set());
-  const [recheck, setRecheck] = useState(0);
 
   const dismiss = (id) => setDismissed(d => new Set([...d, id]));
-  const handleRecheck = () => { setDismissed(new Set()); setRecheck(r => r + 1); toast('Re-checked flow ✓'); };
+  const handleRecheck = () => { setDismissed(new Set()); toast('Re-checked flow ✓'); };
 
   const visibleIssues = issues.filter(i => !dismissed.has(i.id));
   const visibleSuggestions = suggestions.filter(s => !dismissed.has(s.id));
-  const totalCards = visibleIssues.length + visibleSuggestions.length;
 
   return (
     <aside className="rightpanel">
       <div className="rp-tabs">
         <div className="rp-tab active">
-          <Icon.Sparkles /> AI Assistant
+          <Icon.Sparkles /> AI Inspection
           {visibleIssues.length > 0 && <span className="rp-badge">{visibleIssues.length}</span>}
         </div>
       </div>
 
       <div className="rp-body">
-        <div className="rp-section-label"><Icon.Alert style={{ color: 'var(--accent-red)' }} /> Issues · {visibleIssues.length}</div>
+        <div className="rp-section-label rp-issues-head">
+          <span className="rp-issues-head-title">
+            <Icon.Alert style={{ color: 'var(--accent-red)' }} /> Issues · {visibleIssues.length}
+          </span>
+          <button
+            type="button"
+            className="icon-btn rp-recheck-icon"
+            onClick={handleRecheck}
+            title="Re-check flow"
+            aria-label="Re-check flow"
+          >
+            <Icon.RefreshCw style={{ width: 15, height: 15 }} />
+          </button>
+        </div>
         {visibleIssues.length === 0 && <div style={{ fontSize: 12, color: 'var(--ink-500)', padding: '6px 0 2px' }}>No issues. Your flow is valid. ✓</div>}
         {visibleIssues.map(iss => (
           <div key={iss.id} className={`issue-card ${iss.level === 'warn' ? 'warn' : ''}`}>
@@ -1328,7 +1339,7 @@ function RightPanel({ issues, suggestions, onGoToNode, onApplySuggestion, toast 
           </div>
         ))}
 
-        <div className="rp-section-label" style={{ marginTop: 6 }}><Icon.Sparkles style={{ color: 'var(--purple-700)' }} /> Suggestions</div>
+        <div className="rp-section-label rp-suggestions-head"><Icon.Sparkles style={{ color: 'var(--purple-700)' }} /> Suggestions</div>
         {visibleSuggestions.length === 0 && <div style={{ fontSize: 12, color: 'var(--ink-500)', padding: '6px 0 2px' }}>No suggestions.</div>}
         {visibleSuggestions.map(s => (
           <div key={s.id} className="suggest-card">
@@ -1340,14 +1351,6 @@ function RightPanel({ issues, suggestions, onGoToNode, onApplySuggestion, toast 
             </div>
           </div>
         ))}
-
-        {totalCards > 0 && (
-          <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-start' }}>
-            <button className="btn-ai" style={{ flex: 'none', fontSize: 12, padding: '6px 15px', borderRadius: 7, gap: 6 }} onClick={handleRecheck}>
-              <Icon.Sparkles style={{ width: 13, height: 13 }} /> Re-check
-            </button>
-          </div>
-        )}
       </div>
     </aside>
   );
@@ -1529,11 +1532,11 @@ function MiniFlowPreview({ nodes, edges, small = false }) {
 }
 
 const FILE2FLOW_AI_PIPELINE_STEPS = [
-  { id: 'restate', label: '转述签署流程' },
-  { id: 'nodes', label: '提取节点候选' },
-  { id: 'complete', label: '补全前置关系' },
-  { id: 'graph', label: '生成工作流图' },
-  { id: 'validate', label: '检查工作流结构' },
+  { id: 'restate', label: 'Restate signing workflow' },
+  { id: 'nodes', label: 'Extract node candidates' },
+  { id: 'complete', label: 'Complete predecessor links' },
+  { id: 'graph', label: 'Build workflow graph' },
+  { id: 'validate', label: 'Validate workflow structure' },
 ];
 
 function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
@@ -1600,22 +1603,22 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
     setAiPipelineIndex(-1);
     clearPipelineTimer();
     try {
-      setPrepStep('正在确认文件类型与输入来源…');
+      setPrepStep('Detecting file type and input source…');
       await sleep(PREP_MS);
 
       let fileText = '';
       if (file) {
-        setPrepStep('正在从文档提取正文…');
+        setPrepStep('Extracting text from document…');
         fileText = await extractUploadTextForAi(file);
         await sleep(PREP_MS);
       }
 
-      setPrepStep('正在整理分析材料（描述、链接、正文）…');
+      setPrepStep('Preparing materials (description, links, body text)…');
       await sleep(PREP_MS);
 
       const sourceText = [desc, fileText].filter(Boolean).join('\n\n');
       if (!sourceText.trim()) {
-        throw new Error('请先上传文件、填写描述，或粘贴政策正文（至少一种文字材料）。');
+        throw new Error('Please upload a file, add a description, or paste policy text (at least one).');
       }
 
       startPipelineProgressTimer();
@@ -1639,11 +1642,11 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
       if (!data.flow) throw new Error('AI analysis finished but no flow was returned');
 
       setPipelineStep(FILE2FLOW_AI_PIPELINE_STEPS.length - 1);
-      setPrepStep('正在将工作流应用到画布…');
+      setPrepStep('Applying workflow to canvas…');
       await sleep(PREP_MS);
 
       if (data.file2flowDebugPath) {
-        setPrepStep(`调试快照已写入：${data.file2flowDebugPath}`);
+        setPrepStep(`Debug snapshot written: ${data.file2flowDebugPath}`);
         await sleep(1200);
       }
 
@@ -1772,7 +1775,7 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
           {analyzing && !analysisError && (
             <div className="nf-ai-panel">
               <div className="nf-ai-panel-head">
-                <span className="nf-ai-panel-title">分析进度</span>
+                <span className="nf-ai-panel-title">Analysis progress</span>
                 <span className="nf-ai-live-dot" aria-hidden />
               </div>
               {aiPrepMessage ? (
@@ -1832,13 +1835,13 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
                       <div className="nf-ai-step-text">
                         <span className="nf-ai-step-label">{step.label}</span>
                         {!prePipeline && active ? (
-                          <span className="nf-ai-step-meta">进行中</span>
+                          <span className="nf-ai-step-meta">In progress</span>
                         ) : null}
                         {!prePipeline && done ? (
-                          <span className="nf-ai-step-meta nf-ai-step-meta--done">完成</span>
+                          <span className="nf-ai-step-meta nf-ai-step-meta--done">Done</span>
                         ) : null}
                         {!prePipeline && pending ? (
-                          <span className="nf-ai-step-meta nf-ai-step-meta--wait">排队</span>
+                          <span className="nf-ai-step-meta nf-ai-step-meta--wait">Queued</span>
                         ) : null}
                       </div>
                     </li>
@@ -1849,7 +1852,7 @@ function NewFlowModal({ open, onClose, onScratch, toast, onGenerated }) {
           )}
           {analysisError && (
             <div className="nf-ai-error">
-              <div className="nf-ai-error-title">分析失败</div>
+              <div className="nf-ai-error-title">Analysis failed</div>
               <div className="nf-ai-error-body">{analysisError}</div>
             </div>
           )}
