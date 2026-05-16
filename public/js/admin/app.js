@@ -195,6 +195,24 @@ function App() {
     }
   }, [activeBackendFlow, flowToCard, pushToast]);
 
+  const openFlowFromCard = useCallback((f) => {
+    if (!f) return;
+    if (f.backendFlow) {
+      setActiveBackendFlow(f.backendFlow);
+      const graph = backendFlowToBuilderGraph(f.backendFlow);
+      setActiveGraph(graph);
+      setCurrentGraph(graph);
+    } else {
+      setActiveBackendFlow(null);
+      setActiveGraph(null);
+      setCurrentGraph({ nodes: [], edges: [] });
+    }
+    setFlowTitle(f.name || 'Untitled');
+    setFlowDescription(f.backendFlow?.description || '');
+    setPage('canvas');
+    setActiveNav('builder');
+  }, []);
+
   useEffect(() => {
     setSaveStatus('Saving…');
     clearTimeout(saveTimer.current);
@@ -304,7 +322,21 @@ function App() {
           <div className="nav-section-label">My Flows</div>
           <div className="nav-flows-list">
             {generatedFlowCards.map((f, i) => (
-              <div key={f.id || i} className="nav-item nav-flow-item" data-tooltip={f.name} title={sidebarCollapsed ? f.name : ''}>
+              <div
+                key={f.id || i}
+                className="nav-item nav-flow-item"
+                data-tooltip={f.name}
+                title={sidebarCollapsed ? f.name : ''}
+                role="button"
+                tabIndex={0}
+                onClick={() => openFlowFromCard(f)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openFlowFromCard(f);
+                  }
+                }}
+              >
                 <span className="nav-flow-dot" style={{ background: f.status === 'PUBLISHED' ? 'var(--accent-green)' : 'var(--ink-400)' }} />
                 <span className="nav-label" style={{ color: 'var(--ink-700)' }}>{f.name}</span>
               </div>
@@ -335,21 +367,7 @@ function App() {
         {activeNav === 'builder' && page === 'library' && (
           <FlowLibrary
             flows={generatedFlowCards}
-            onOpen={(f) => {
-              if (f.backendFlow) {
-                setActiveBackendFlow(f.backendFlow);
-                const graph = backendFlowToBuilderGraph(f.backendFlow);
-                setActiveGraph(graph);
-                setCurrentGraph(graph);
-              } else {
-                setActiveBackendFlow(null);
-                setActiveGraph(null);
-                setCurrentGraph({ nodes: [], edges: [] });
-              }
-              setFlowTitle(f.name);
-              setFlowDescription(f.backendFlow?.description || '');
-              setPage('canvas');
-            }}
+            onOpen={openFlowFromCard}
             onScratch={() => { setActiveBackendFlow(null); setActiveGraph(null); setCurrentGraph({ nodes: [], edges: [] }); setFlowTitle('Untitled Flow'); setPage('canvas'); }}
             toast={pushToast}
             onGenerated={handleGeneratedFlow}
