@@ -833,7 +833,26 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     setSelected({ type: 'node', id: nodeId });
   }, [nodes]);
 
-  useEffect(() => { registerAdders({ addNode, fixIssue: (iss) => jumpToNode(iss.nodeId), updateNode }); }, [addNode, jumpToNode, updateNode, registerAdders]);
+  const applyAssistantOperations = useCallback((operations) => {
+    if (!Array.isArray(operations) || !operations.length) {
+      return { applied: 0, skipped: [], nodes, edges };
+    }
+    snapshot();
+    const result = applyAssistantOperationsToGraph(nodes, edges, operations);
+    setNodes(result.nodes);
+    setEdges(result.edges);
+    return result;
+  }, [nodes, edges, snapshot]);
+
+  useEffect(() => {
+    registerAdders({
+      addNode,
+      fixIssue: (iss) => jumpToNode(iss.nodeId),
+      updateNode,
+      applyAssistantOperations,
+      undo,
+    });
+  }, [addNode, jumpToNode, updateNode, applyAssistantOperations, undo, registerAdders]);
 
   const nodeMap = useMemo(() => Object.fromEntries(nodes.map(n => [n.id, n])), [nodes]);
 
@@ -1424,7 +1443,194 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
   return null;
 }
 
-function RightPanel({ issues, suggestions, onGoToNode, onApplySuggestion, toast }) {
+function AiSourceInputs({ url, setUrl, file, setFile, desc, setDesc, compact = false }) {
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = React.useRef(null);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) setFile(f);
+  };
+  const handleFile = (e) => {
+    const f = e.target.files?.[0];
+    if (f) setFile(f);
+  };
+  const GlobeIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18"/>
+    </svg>
+  );
+  const UploadIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+  );
+  const optLabel = compact ? ' — optional' : (
+    <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--ink-400)' }}> — optional</span>
+  );
+  return (
+    <div className={'ai-source-fields' + (compact ? ' ai-source-fields--compact' : '')}>
+      <div>
+        <div className="nf-field-label">Import from URL{optLabel}</div>
+        <div className="nf-url-wrap">
+          <GlobeIcon style={{ color: 'var(--ink-400)', flexShrink: 0 }} />
+          <input className="nf-url-input" placeholder="https://policy.uw.edu/…" value={url} onChange={(e) => setUrl(e.target.value)} />
+          {url ? (
+            <button type="button" style={{ color: 'var(--ink-400)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}
+              onClick={() => setUrl('')} aria-label="Clear URL"><Icon.X /></button>
+          ) : null}
+        </div>
+      </div>
+      <div>
+        <div className="nf-field-label">Upload a document{optLabel}</div>
+        {file ? (
+          <div className="nf-file-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+            <span style={{ color: 'var(--purple-500)', fontSize: 11 }}>{Math.round(file.size / 1024)} KB</span>
+            <button type="button" style={{ color: 'var(--ink-400)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}
+              onClick={() => setFile(null)} aria-label="Remove file"><Icon.X /></button>
+          </div>
+        ) : (
+          <div className={'nf-drop' + (dragOver ? ' drag-over' : '') + (compact ? ' nf-drop--compact' : '')}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileRef.current?.click()}>
+            <div className="nf-drop-icon"><UploadIcon /></div>
+            <div className="nf-drop-title">{compact ? 'Drop or browse' : 'Drag a file here'}</div>
+            {!compact && (
+              <div className="nf-drop-sub">Drop a PDF, DOC, DOCX, or TXT — or <span className="nf-drop-link">browse to upload</span></div>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>PDF · DOC · DOCX · TXT</div>
+          </div>
+        )}
+        <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" hidden onChange={handleFile} />
+      </div>
+      <div>
+        <div className="nf-field-label">Instructions or text{optLabel}</div>
+        <textarea className="nf-desc" placeholder="Describe what to change in this flow, or paste policy text…"
+          value={desc} onChange={(e) => setDesc(e.target.value)} rows={compact ? 3 : 3} />
+      </div>
+    </div>
+  );
+}
+
+function AiAssistantPanel({ graph, flowTitle, onApplyAssistantOperations, onUndo, toast }) {
+  const [url, setUrl] = useState('');
+  const [file, setFile] = useState(null);
+  const [desc, setDesc] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [plan, setPlan] = useState('');
+  const [lastResult, setLastResult] = useState(null);
+
+  const buildSourceText = async () => {
+    let fileText = '';
+    if (file) fileText = await extractUploadTextForAi(file);
+    return [desc, fileText].filter(Boolean).join('\n\n').trim();
+  };
+
+  const runAssistant = async () => {
+    setBusy(true);
+    setError('');
+    setPlan('');
+    setLastResult(null);
+    try {
+      const sourceText = await buildSourceText();
+      if (!sourceText && !url.trim()) throw new Error('Add instructions, upload a file, or paste text.');
+      const ctx = graphToAssistantContext(graph);
+      const res = await fetch(`${API_BASE}/assistant`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceText: sourceText || 'Apply updates based on the linked source.',
+          sourceUrl: url.trim() || null,
+          flowName: flowTitle || 'Current flow',
+          graph: ctx,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Assistant request failed');
+      setPlan(data.plan || '');
+      if (!data.operations?.length) {
+        toast(data.plan || 'No changes suggested.');
+        setLastResult({ applied: 0, skipped: [] });
+        return;
+      }
+      if (!onApplyAssistantOperations) throw new Error('Canvas is not ready.');
+      const result = onApplyAssistantOperations(data.operations);
+      setLastResult(result);
+      const skippedN = result.skipped?.length || 0;
+      toast(
+        skippedN
+          ? `Applied ${result.applied} change(s); ${skippedN} skipped. Undo with ⌘Z.`
+          : `Applied ${result.applied} change(s). Undo with ⌘Z.`,
+        { duration: 4500 },
+      );
+    } catch (e) {
+      const msg = e.message || 'Assistant failed';
+      setError(msg);
+      toast(msg, { duration: 5000 });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rp-assistant">
+      <AiSourceInputs url={url} setUrl={setUrl} file={file} setFile={setFile} desc={desc} setDesc={setDesc} compact />
+      {busy && (
+        <div className="rp-assistant-status">
+          <span className="nf-ai-spinner" style={{ width: 14, height: 14 }} />
+          Analyzing workflow and planning edits…
+        </div>
+      )}
+      {error && (
+        <div className="nf-ai-error">
+          <div className="nf-ai-error-title">Request failed</div>
+          <div className="nf-ai-error-body">{error}</div>
+        </div>
+      )}
+      {plan && !busy && (
+        <div className="rp-assistant-plan">
+          <div className="rp-section-label" style={{ marginBottom: 6 }}>Plan</div>
+          <p>{plan}</p>
+          {lastResult && lastResult.applied > 0 && (
+            <p className="rp-assistant-hint">Changes are on the canvas. Press <kbd>⌘Z</kbd> or Undo to revert.</p>
+          )}
+        </div>
+      )}
+      <div className="rp-assistant-actions">
+        <button type="button" className="btn-ai rp-assistant-run" onClick={runAssistant} disabled={busy}>
+          <Icon.Sparkles style={{ width: 14, height: 14 }} />
+          {busy ? 'Working…' : 'Apply AI edits'}
+        </button>
+        {onUndo && (
+          <button type="button" className="btn btn-secondary rp-assistant-undo" onClick={onUndo} title="Undo (⌘Z)">
+            <Icon.Undo style={{ width: 14, height: 14 }} /> Undo
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RightPanel({
+  issues,
+  suggestions,
+  onGoToNode,
+  onApplySuggestion,
+  toast,
+  graph,
+  flowTitle,
+  onApplyAssistantOperations,
+  onUndo,
+}) {
+  const [rpTab, setRpTab] = useState('inspection');
   const [dismissed, setDismissed] = useState(new Set());
 
   const dismiss = (id) => setDismissed(d => new Set([...d, id]));
@@ -1436,12 +1642,34 @@ function RightPanel({ issues, suggestions, onGoToNode, onApplySuggestion, toast 
   return (
     <aside className="rightpanel">
       <div className="rp-tabs">
-        <div className="rp-tab active">
+        <button
+          type="button"
+          className={'rp-tab' + (rpTab === 'inspection' ? ' active' : '')}
+          onClick={() => setRpTab('inspection')}
+        >
           <Icon.Sparkles /> AI Inspection
           {visibleIssues.length > 0 && <span className="rp-badge">{visibleIssues.length}</span>}
-        </div>
+        </button>
+        <button
+          type="button"
+          className={'rp-tab' + (rpTab === 'assistant' ? ' active' : '')}
+          onClick={() => setRpTab('assistant')}
+        >
+          <Icon.Msg /> AI Assistant
+        </button>
       </div>
 
+      {rpTab === 'assistant' ? (
+        <div className="rp-body rp-body--assistant">
+          <AiAssistantPanel
+            graph={graph}
+            flowTitle={flowTitle}
+            onApplyAssistantOperations={onApplyAssistantOperations}
+            onUndo={onUndo}
+            toast={toast}
+          />
+        </div>
+      ) : (
       <div className="rp-body">
         <div className="rp-section-label rp-issues-head">
           <span className="rp-issues-head-title">
@@ -1482,6 +1710,7 @@ function RightPanel({ issues, suggestions, onGoToNode, onApplySuggestion, toast 
           </div>
         ))}
       </div>
+      )}
     </aside>
   );
 }
