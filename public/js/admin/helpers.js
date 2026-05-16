@@ -648,3 +648,205 @@ const bezier = (a, b) => {
   return `M ${a.x},${a.y} C ${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
 };
 
+/** Compact graph summary for AI assistant prompts. */
+function graphToAssistantContext(graph) {
+  const nodes = graph?.nodes || [];
+  const edges = graph?.edges || [];
+  return {
+    nodes: nodes.map((n) => {
+      const base = { id: n.id, type: n.type, x: n.x, y: n.y };
+      if (n.type === 'definition') {
+        return { ...base, title: n.title, body: (n.body || '').slice(0, 800) };
+      }
+      if (n.type === 'decision') {
+        return {
+          ...base,
+          title: n.title,
+          answers: (n.answers || []).map((a) => ({
+            id: a.id,
+            label: a.label,
+            rationale: (a.rationale || '').slice(0, 200),
+          })),
+        };
+      }
+      if (n.type === 'people') {
+        return { ...base, name: n.name, role: n.role, email: n.email };
+      }
+      if (n.type === 'action') {
+        return {
+          ...base,
+          title: n.title,
+          description: (n.description || '').slice(0, 400),
+          assignee: n.assignee,
+        };
+      }
+      return { ...base, title: n.title || n.name };
+    }),
+    edges: edges.map((e) => ({
+      id: e.id,
+      from: e.from,
+      fromPort: e.fromPort,
+      to: e.to,
+    })),
+  };
+}
+
+function resolveAssistantNodeRef(ref, idMap, nodes) {
+  if (!ref) return null;
+  if (idMap[ref]) return idMap[ref];
+  if (nodes.some((n) => n.id === ref)) return ref;
+  return null;
+}
+
+function buildAssistantNodeFromPayload(payload, fallbackX, fallbackY) {
+  const type = payload.type || 'action';
+  const base = {
+    id: payload.id || `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    x: typeof payload.x === 'number' ? payload.x : fallbackX,
+    y: typeof payload.y === 'number' ? payload.y : fallbackY,
+  };
+  if (type === 'decision') {
+    const answers = (payload.answers || [{ label: 'Yes' }, { label: 'No' }]).map((a, i) => ({
+      id: a.id || `a_${Date.now()}_${i}`,
+      label: a.label || `Option ${i + 1}`,
+      rationale: a.rationale != null ? String(a.rationale) : '',
+    }));
+    return { ...base, type: 'decision', title: payload.title || 'New decision?', answers };
+  }
+  if (type === 'people') {
+    return {
+      ...base,
+      type: 'people',
+      name: payload.name || payload.title || 'Contact',
+      role: payload.role || '',
+      email: payload.email || '',
+      hiddenFromResearchers: Boolean(payload.hiddenFromResearchers),
+    };
+  }
+  return {
+    ...base,
+    type: 'action',
+    title: payload.title || 'New action',
+    description: payload.description || '',
+    assignee: payload.assignee || '',
+    materials: ensureMaterialsArray(payload.materials),
+  };
+}
+
+/**
+ * Apply assistant operation list to a builder graph. Returns { nodes, edges, applied, skipped }.
+ */
+function applyAssistantOperationsToGraph(nodes, edges, operations) {
+  let nextNodes = nodes.map((n) => ({ ...n, answers: n.answers?.map((a) => ({ ...a })) }));
+  let nextEdges = edges.map((e) => ({ ...e }));
+  const idMap = {};
+  let applied = 0;
+  const skipped = [];
+  const maxX = nextNodes.reduce((m, n) => Math.max(m, n.x || 0), -310);
+  let spawnY = 80;
+
+  for (const raw of operations || []) {
+    const op = raw?.op || raw?.type;
+    try {
+      if (op === 'add_node') {
+        const payload = raw.node || raw.payload?.node || {};
+        const node = buildAssistantNodeFromPayload(payload, maxX + 330, spawnY);
+        spawnY += 120;
+        nextNodes.push(node);
+        if (raw.tempId) idMap[raw.tempId] = node.id;
+        if (payload.tempId) idMap[payload.tempId] = node.id;
+        applied += 1;
+      } else if (op === 'update_node') {
+        const nodeId = resolveAssistantNodeRef(raw.nodeId || raw.id, idMap, nextNodes);
+        const fields = raw.fields || raw.patch || raw.payload?.fields || {};
+        if (!nodeId) throw new Error('Unknown node');
+        const idx = nextNodes.findIndex((n) => n.id === nodeId);
+        if (idx < 0) throw new Error('Node not found');
+        const cur = nextNodes[idx];
+        if (cur.type === 'definition') {
+          nextNodes[idx] = {
+            ...cur,
+            title: fields.title ?? cur.title,
+            body: fields.body ?? fields.description ?? cur.body,
+            relatedOffices: fields.relatedOffices ?? cur.relatedOffices,
+            templates: fields.templates ?? cur.templates,
+            resources: fields.resources ?? cur.resources,
+          };
+        } else if (cur.type === 'decision') {
+          let answers = cur.answers;
+          if (Array.isArray(fields.answers)) {
+            answers = fields.answers.map((a, i) => ({
+              id: a.id || cur.answers?.[i]?.id || `a_${Date.now()}_${i}`,
+              label: a.label ?? a.text ?? `Option ${i + 1}`,
+              rationale: a.rationale != null ? String(a.rationale) : '',
+            }));
+          }
+          nextNodes[idx] = { ...cur, title: fields.title ?? cur.title, answers };
+        } else if (cur.type === 'people') {
+          nextNodes[idx] = {
+            ...cur,
+            name: fields.name ?? cur.name,
+            role: fields.role ?? cur.role,
+            email: fields.email ?? cur.email,
+            hiddenFromResearchers: fields.hiddenFromResearchers ?? cur.hiddenFromResearchers,
+          };
+        } else {
+          nextNodes[idx] = {
+            ...cur,
+            title: fields.title ?? cur.title,
+            description: fields.description ?? cur.description,
+            assignee: fields.assignee ?? cur.assignee,
+            materials: fields.materials != null ? ensureMaterialsArray(fields.materials) : cur.materials,
+          };
+        }
+        applied += 1;
+      } else if (op === 'delete_node') {
+        const nodeId = resolveAssistantNodeRef(raw.nodeId || raw.id, idMap, nextNodes);
+        if (!nodeId) throw new Error('Unknown node');
+        const target = nextNodes.find((n) => n.id === nodeId);
+        if (target?.type === 'definition') throw new Error('Cannot delete definition node');
+        nextNodes = nextNodes.filter((n) => n.id !== nodeId);
+        nextEdges = nextEdges.filter((e) => e.from !== nodeId && e.to !== nodeId);
+        applied += 1;
+      } else if (op === 'add_edge' || op === 'connect') {
+        const from = resolveAssistantNodeRef(raw.from, idMap, nextNodes);
+        const to = resolveAssistantNodeRef(raw.to, idMap, nextNodes);
+        if (!from || !to) throw new Error('Unknown edge endpoint');
+        const fromPort = raw.fromPort || 'out';
+        nextEdges = nextEdges.filter((e) => !(e.from === from && e.fromPort === fromPort));
+        nextEdges.push({
+          id: raw.edgeId || `e_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          from,
+          fromPort,
+          to,
+          toPort: raw.toPort || 'in',
+        });
+        applied += 1;
+      } else if (op === 'remove_edge' || op === 'delete_edge') {
+        if (raw.edgeId) {
+          nextEdges = nextEdges.filter((e) => e.id !== raw.edgeId);
+        } else {
+          const from = resolveAssistantNodeRef(raw.from, idMap, nextNodes);
+          const to = resolveAssistantNodeRef(raw.to, idMap, nextNodes);
+          const fromPort = raw.fromPort;
+          nextEdges = nextEdges.filter(
+            (e) => !(e.from === from && e.to === to && (fromPort == null || e.fromPort === fromPort)),
+          );
+        }
+        applied += 1;
+      } else {
+        skipped.push({ op, reason: `Unknown operation: ${op}` });
+      }
+    } catch (e) {
+      skipped.push({ op, reason: e.message || String(e) });
+    }
+  }
+
+  return {
+    nodes: ensureDefinitionNode(nextNodes),
+    edges: nextEdges,
+    applied,
+    skipped,
+  };
+}
+

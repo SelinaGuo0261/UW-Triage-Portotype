@@ -1519,6 +1519,98 @@ function createSnapshot(flow, scope) {
 const MAX_EXTRACT_DOC_BYTES = 18 * 1024 * 1024;
 
 /** Browser sends legacy .doc as base64; server uses word-extractor (OLE binary not readable in-browser). */
+async function parseAssistantResponse(rawAi, config) {
+  let jsonText = extractJsonCandidate(rawAi);
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    const repaired = await callAi(
+      `Fix this to valid JSON only (no markdown). Output a single JSON object with keys "plan" (string) and "operations" (array).\n\n${jsonText.slice(0, 12000)}`,
+      config,
+    );
+    jsonText = extractJsonCandidate(repaired);
+    parsed = JSON.parse(jsonText);
+  }
+  if (!parsed || typeof parsed !== 'object') throw new Error('Assistant returned invalid JSON.');
+  const operations = Array.isArray(parsed.operations) ? parsed.operations : [];
+  const plan = String(parsed.plan || parsed.summary || '').trim();
+  return { plan, operations };
+}
+
+async function generateAssistantEdits(body) {
+  if (!aiConfig?.apiKey) throw new Error('AI is not configured. Restart the dev server.');
+
+  const sourceText = String(body.sourceText || '').trim();
+  if (!sourceText) throw new Error('Please provide text, a file, or instructions.');
+
+  const graph = body.graph || {};
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  if (!nodes.length) throw new Error('Workflow has no nodes to edit.');
+
+  const sourceUrl = body.sourceUrl ? String(body.sourceUrl).trim() : '';
+  const flowName = body.flowName ? String(body.flowName).trim() : 'Current flow';
+  const combinedInput = [
+    sourceUrl ? `Source URL: ${sourceUrl}` : '',
+    sourceText,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 28000);
+
+  const graphJson = JSON.stringify({ nodes, edges }, null, 2).slice(0, 24000);
+
+  const prompt = `You edit an EXISTING UW triage workflow (do NOT rebuild from scratch).
+
+FLOW NAME: ${flowName}
+
+CURRENT WORKFLOW (builder graph JSON — node ids and answer ids must be reused when updating/connecting):
+${graphJson}
+
+USER MATERIALS (policy text, instructions, file excerpt):
+${combinedInput}
+
+TASK:
+1. Read the materials and the current graph.
+2. Decide minimal edits: add/update/delete nodes, add/remove connections.
+3. Output JSON only with this exact shape:
+{
+  "plan": "2-6 sentences in English describing what you will change and where in the flow",
+  "operations": [
+    { "op": "add_node", "tempId": "optional_temp_1", "node": { "type": "decision|action|people", "title": "...", "x": number, "y": number, "answers": [{"label":"..."}], "description": "...", "assignee": "...", "name": "...", "role": "...", "email": "..." } },
+    { "op": "update_node", "nodeId": "existing_id", "fields": { "title": "...", "body": "...", "answers": [{"id":"existing_answer_id","label":"..."}] } },
+    { "op": "delete_node", "nodeId": "existing_id" },
+    { "op": "connect", "from": "node_id_or_tempId", "fromPort": "answer_id_or_out", "to": "node_id_or_tempId" },
+    { "op": "remove_edge", "from": "...", "fromPort": "...", "to": "..." }
+  ]
+}
+
+RULES:
+- Never delete the definition node (type definition).
+- Prefer update_node over delete+add when possible.
+- For decision nodes, each answer needs a stable id; reuse existing answer ids when updating.
+- fromPort on definition nodes is always "out".
+- When adding nodes, place x/y to the right of existing content (x increases left-to-right).
+- Use tempId on add_node when you need to connect to a new node in a later connect op.
+- Keep operations under 20 steps.
+- If materials do not justify changes, return "plan" explaining that and "operations": [].`;
+
+  const rawAi = await callAi(prompt, aiConfig);
+  return parseAssistantResponse(rawAi, aiConfig);
+}
+
+async function handleFlowAssistant(req, res) {
+  try {
+    const body = await readJson(req);
+    const result = await generateAssistantEdits(body);
+    return send(res, 200, result);
+  } catch (error) {
+    console.warn('[assistant]', error?.message || error);
+    return send(res, 500, { error: error.message || 'Assistant request failed.' });
+  }
+}
+
 async function handleExtractDocText(req, res) {
   try {
     const body = await readJson(req);
@@ -1568,6 +1660,10 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'POST' && url.pathname === '/api/extract-doc-text') {
     return handleExtractDocText(req, res);
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/assistant') {
+    return handleFlowAssistant(req, res);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/flows') {

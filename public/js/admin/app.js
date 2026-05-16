@@ -579,7 +579,17 @@ function App() {
       {showCanvas && (
         preview
           ? <PreviewPanel allNodes={allNodes} flowTitle={flowTitle} />
-          : <RightPanel issues={issuesData.issues} suggestions={issuesData.suggestions} onGoToNode={handleFixIssue} onApplySuggestion={(s) => pushToast(`Applied: ${s.title}`)} toast={pushToast} />
+          : <RightPanel
+            issues={issuesData.issues}
+            suggestions={issuesData.suggestions}
+            onGoToNode={handleFixIssue}
+            onApplySuggestion={(s) => pushToast(`Applied: ${s.title}`)}
+            toast={pushToast}
+            graph={currentGraph}
+            flowTitle={flowTitle}
+            onApplyAssistantOperations={adders.applyAssistantOperations}
+            onUndo={adders.undo}
+          />
       )}
 
       {/* Modals */}
