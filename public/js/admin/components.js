@@ -997,22 +997,12 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
           }} />
           <button className="tool-btn tool-btn-ai" onClick={() => {
             snapshot();
-            const cols = [[], [], []];
-            nodes.forEach(n => {
-              if (n.type === 'decision') cols[0].push(n);
-              else if (n.type === 'action') cols[1].push(n);
-              else cols[2].push(n);
-            });
-            const colX = [80, 380, 680];
-            const newNodes = nodes.map(n => {
-              const ci = n.type === 'decision' ? 0 : n.type === 'action' ? 1 : 2;
-              const idx = cols[ci].indexOf(n);
-              const prevH = cols[ci].slice(0, idx).reduce((sum, m) => sum + nodeHeight(m) + 24, 0);
-              return { ...n, x: colX[ci], y: 80 + prevH };
-            });
-            setNodes(newNodes);
+            const result = autoLayoutBuilderGraph({ nodes, edges });
+            setNodes(result.nodes);
+            // Re-run the post-render normalize pass against fresh DOM heights.
+            hasNormalizedRef.current = false;
             toast('Auto-layout applied');
-          }} title="Automatically arrange nodes into columns">
+          }} title="Re-run tidy-tree auto-layout">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="10" rx="1"/><rect x="14" y="16" width="7" height="5" rx="1"/>
             </svg>
