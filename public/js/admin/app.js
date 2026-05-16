@@ -554,7 +554,7 @@ function App() {
                     <button className="btn btn-secondary" onClick={() => setInviteOpen(true)}><Icon.Share /> Share</button>
                     <button className="btn btn-secondary" style={{ gap: 6 }} onClick={() => setPreview(true)} title="Preview flow"><Icon.Play /> Preview</button>
                     <button className="btn btn-primary" onClick={() => setPublishOpen(true)} title={isPublished ? 'Re-publish to update researcher portal' : 'Publish to researcher portal'}>
-                      <Icon.Globe /> {isPublished ? 'Republish' : 'Publish to Production'}
+                      <Icon.Globe /> {isPublished ? 'Republish' : (<>Publish<span className="btn-label-suffix"> to Production</span></>)}
                     </button>
                   </>
                 )}
