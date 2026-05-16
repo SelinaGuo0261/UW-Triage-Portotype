@@ -2,3 +2,4 @@
 node_modules/
 data/file2flow-debug-last.json
 data/file2flow-segments-candidates-last.json
+.claude/
