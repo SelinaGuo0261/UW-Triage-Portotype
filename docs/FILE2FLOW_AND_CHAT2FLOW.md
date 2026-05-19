@@ -35,16 +35,19 @@ flowchart LR
   B2 --> C["02 预处理 candidatePoints dossier"]
   C --> D["03 补全 predecessorId（可选）"]
   D --> E["04 构图 JSON"]
-  E --> F[normalizeAiGraph + validateFlow]
+  E --> F["normalizeAiGraph"]
+  F --> G["05 微调顺序（纯算法，仅违规时触发）"]
+  G --> H["validateFlow"]
 ```
 
-| 步骤 | 提示词文件 | `callAi` | 输入要点 |
-|------|------------|----------|----------|
+| 步骤 | 提示词文件 / 函数 | `callAi` | 输入要点 |
+|------|-------------------|----------|----------|
 | 1. 转述 | `prompts/file2flow/01-source-restatement.md` | 是（可跳过） | 固定英文指令 + `---` + **原始** `sourceText` |
 | 1b. 标题 | `prompts/file2flow/01b-flow-title-from-restatement.md` | 是（可跳过） | 转述全文 + 前端草稿 `name` / `sourceFile` → **简洁名**（含文书类型）；写入 `pipelineInput.name` 并覆盖最终 `flowName` 与 DEFINITION 节点 `label` |
 | 2. 预处理 | `prompts/file2flow/02-source-preprocess.md` | 是（可跳过） | **转述后**全文 `{{SOURCE_TEXT}}` → `candidatePoints`、分支 dossier 等 |
 | 3. 候选点补全 | `prompts/file2flow/03-complete-candidate-points.md` | 是（可跳过） | **原始**正文 + 转述文 + `candidatePoints` JSON；可新增点、补 `predecessorId` |
 | 4. 构图 | `prompts/file2flow/04-graph-from-source.md` | 是 | 转述全文 + **formatPreprocessDossier** 注入段 |
+| **5. 微调顺序** | **`restructureDecisionsBeforeActions()`**（server.mjs） | **否** | normalize 后的图；强制 `DEFINITION → DECISION* → (ACTION\|PEOPLE)*` 形状；仅检测到违规时重写 |
 | — | `prompts/file2flow/05-json-repair.md` | 仅 **JSON 解析失败** | 预处理 / 补全 / 构图 任意一步坏 JSON 时的修复提示 |
 
 **构图提示**要求与 **candidatePoints** 逐项对应（lockstep）：每个候选点对应一个 `nodes[]` 项，`tempId` = 该点 `id`（如 `pt-1`）；按 `predecessorId` 连边；同一 DECISION 多子节点时需多 answer + 多出口边（见模板正文）。
@@ -148,6 +151,31 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 - 构图输出：`extractJsonCandidate` → `JSON.parse`；失败则 **`05-json-repair.md`** → `repairCommonJsonIssues`；仍失败则 **抛错**（弹窗展示）。
 - **`normalizeAiGraph`**：`tempId` → 持久 `id`，过滤无效边，网格布局；要求至少一个 **DEFINITION** 与一个 **ACTION**。
 
+### 3.6b 步骤 5 — 微调顺序（`restructureDecisionsBeforeActions`）
+
+研究员端的体验是「先答完所有问题，再看到所有 action / contact」。这一步把图强制改成：
+
+```
+DEFINITION → DECISION* → (ACTION | PEOPLE)*
+```
+
+每条从 DEFINITION 到叶子的路径都必须先经过 **0 个或多个 DECISION**，然后才能出现 ACTION/PEOPLE，且 **ACTION/PEOPLE 之后不允许再出现 DECISION**。
+
+**算法**（纯本地，无 LLM）：
+
+1. **检测违规**：DFS from DEFINITION，标记任何 `(ACTION ancestor) → DECISION` 的边。无违规直接返回原图（pass-through）。
+2. **枚举路径**：DFS 列出所有 DEFINITION → leaf 的简单路径，每步记录 `(nodeId, portToNext)`（decision 的 port = answer id）。
+3. **重写每条路径**：把路径拆成 `decisions[]`（保原顺序）+ `actions[]`（保原顺序），重组为 `def → decisions → actions`。
+4. **节点处理**：
+   - **DECISION 共享**：每个 decision 在最终图里只出现一次（按 id 去重）；
+   - **ACTION / PEOPLE 克隆**：每条路径自带一份独立 clone（id 加 `__pX_Y` 后缀）。这样保证不同终端答案分别对应一条独立的 action 链，研究员遍历时不会跨答案混淆。
+5. **边去重**：按 `(source, sourceAnswerId, target)` 去重；decision 间的边共享，clone 之间的边天然唯一。
+6. **孤立节点**：原图里不可达的节点原样保留。
+
+**Port 语义保留**：原路径上 decision 的某个 answer port 引向了下一节点 —— 重写后，同一个 port 引向下一个 decision（如果有）或第一个 action clone。研究员遍历逻辑不需要改。
+
+**已知不足**：算法只重排，不修改节点内容。如果 AI 把"实质是判断"的步骤标成了 ACTION（例如 "Determine if X" 后面紧跟一个 DECISION），算法只能把它挪到 decisions 之后，无法把它转成 DECISION。这种语义级的修正需要后续 LLM 步骤或手工。
+
 ### 3.7 调试与落盘
 
 | 文件 | 何时写入 | 主要内容 |
@@ -167,6 +195,7 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 | `step2c_dossierStringInjectedIntoGraphPrompt` | 实际拼进构图 prompt 的 dossier |
 | `step3_*` | 构图 prompt / 原始输出 / 解析 / 修复日志 |
 | `step4_normalizedGraph` | 归一化后的图 |
+| **`step5_restructure`** | 微调顺序步骤：`changed` / `violations[]` / `pathCount` / `cloneCount` / `graphAfter`（仅 changed 时含图） |
 
 ### 3.8 环境变量
 
@@ -176,12 +205,13 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 | `AI_SKIP_FLOW_TITLE_FROM_RESTATEMENT=1` | 跳过 **01b** 标题 LLM |
 | `AI_SKIP_SOURCE_PREPROCESS=1` | 跳过预处理 LLM |
 | **`AI_SKIP_CANDIDATE_POINT_COMPLETION=1`** | 跳过候选点补全 LLM |
+| **`AI_SKIP_DECISION_REORDER=1`** | 跳过步骤 5 微调顺序（即使图有违规也保留原结构） |
 | `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL` | AI 配置 |
 | `AI_MAX_OUTPUT_TOKENS_*` | 各提供商输出 token 上限 |
 
 ### 3.9 与参考方案差异 / 未使用路径
 
-- 主链路：**转述 → 建议标题 → 预处理 →（可选）补全候选点 → 构图 → 归一化**；无字符分段。
+- 主链路：**转述 → 建议标题 → 预处理 →（可选）补全候选点 → 构图 → 归一化 → 微调顺序**；无字符分段。
 - **`segmentSourceTextWithLlm` 等**：代码库可能仍存在，**主流程不调用**。
 
 ---

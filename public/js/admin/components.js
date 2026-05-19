@@ -1960,6 +1960,7 @@ const FILE2FLOW_AI_PIPELINE_STEPS = [
   { id: 'nodes', label: 'Extract node candidates' },
   { id: 'complete', label: 'Complete predecessor links' },
   { id: 'graph', label: 'Build workflow graph' },
+  { id: 'reorder', label: 'Reorder decisions before actions' },
   { id: 'validate', label: 'Validate workflow structure' },
 ];
 

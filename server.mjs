@@ -1304,6 +1304,42 @@ async function generateGraph(input, debugFile2flow = false) {
     await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
   }
 
+  // ── Step 5: enforce researcher contract — decisions strictly before actions on every path.
+  //    No LLM call; only runs when a violation is detected. If the original is already
+  //    compliant, the graph passes through untouched.
+  if (process.env.AI_SKIP_DECISION_REORDER !== '1') {
+    const restructureResult = restructureDecisionsBeforeActions({
+      flowName: normalized.flowName,
+      description: normalized.description,
+      nodes: normalized.nodes,
+      edges: normalized.edges,
+    });
+    if (restructureResult.changed) {
+      console.log(
+        `[file2flow] restructured: ${restructureResult.violations.length} violation(s), ` +
+        `${restructureResult.pathCount} path(s), cloned ${restructureResult.cloneCount} action(s)`
+      );
+      normalized.nodes = restructureResult.graph.nodes;
+      normalized.edges = restructureResult.graph.edges;
+    }
+    if (snap) {
+      snap.step5_restructure = {
+        skipped: false,
+        changed: restructureResult.changed,
+        violations: restructureResult.violations,
+        pathCount: restructureResult.pathCount,
+        cloneCount: restructureResult.cloneCount,
+        graphAfter: restructureResult.changed
+          ? { nodes: normalized.nodes, edges: normalized.edges }
+          : null,
+      };
+      await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
+    }
+  } else if (snap) {
+    snap.step5_restructure = { skipped: true, reason: 'AI_SKIP_DECISION_REORDER=1' };
+    await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
+  }
+
   return normalized;
 }
 
@@ -1342,6 +1378,201 @@ function normalizeActionMaterialsForNode(materials) {
     attachKind: mat && mat.attachKind != null ? mat.attachKind : null,
     attachValue: mat && mat.attachValue != null ? String(mat.attachValue) : '',
   }));
+}
+
+/**
+ * Enforces the researcher-portal contract:
+ *   every path from DEFINITION must look like DEFINITION → DECISION* → (ACTION|PEOPLE)*
+ *
+ * Algorithm (pure, no LLM):
+ *   1. Walk the graph; if no path violates the constraint, return graph unchanged.
+ *   2. Enumerate every simple path from DEFINITION to a leaf.
+ *   3. For each path, split into [decisions in original order] + [actions in original order],
+ *      then rebuild as decisions → actions.
+ *   4. DECISION nodes are shared by id across paths (same question = same node).
+ *      ACTION / PEOPLE nodes are CLONED per path so each terminal answer leaf gets its own
+ *      checklist chain — this keeps the resulting DAG unambiguous for the researcher walker.
+ *   5. Edges are deduped by (source, sourceAnswerId, target).
+ *
+ * The decision-port semantics are preserved: the answer port that originally led down a
+ * path becomes the port that now leads to the next decision (or, for the last decision,
+ * to the first action of the rewritten chain).
+ *
+ * Orphan nodes (unreachable from DEFINITION in the original graph) are preserved as-is.
+ *
+ * Returns { graph, changed, violations: [{from, to}], pathCount, cloneCount }.
+ */
+function restructureDecisionsBeforeActions(graph) {
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const definition = nodes.find((n) => n.type === NodeType.DEFINITION);
+  if (!definition) return { graph, changed: false, violations: [], pathCount: 0, cloneCount: 0 };
+
+  const isAction = (t) => t === NodeType.ACTION || t === NodeType.PEOPLE;
+  const isDecision = (t) => t === NodeType.DECISION;
+
+  // ── 1) Detect violations: any edge where the source has an ACTION/PEOPLE ancestor and the
+  //      target is a DECISION.
+  const violations = [];
+  {
+    const seenState = new Set();
+    const stack = [{ nodeId: definition.id, seenAction: false }];
+    while (stack.length) {
+      const { nodeId, seenAction } = stack.pop();
+      const stateKey = `${nodeId}|${seenAction ? '1' : '0'}`;
+      if (seenState.has(stateKey)) continue;
+      seenState.add(stateKey);
+      const node = byId.get(nodeId);
+      if (!node) continue;
+      const nextSeenAction = seenAction || isAction(node.type);
+      edges.filter((e) => e.sourceNodeId === nodeId).forEach((e) => {
+        const target = byId.get(e.targetNodeId);
+        if (!target) return;
+        if (nextSeenAction && isDecision(target.type)) {
+          violations.push({ from: nodeId, to: e.targetNodeId });
+        }
+        stack.push({ nodeId: e.targetNodeId, seenAction: nextSeenAction });
+      });
+    }
+  }
+  if (violations.length === 0) {
+    return { graph, changed: false, violations: [], pathCount: 0, cloneCount: 0 };
+  }
+
+  // ── 2) Enumerate simple paths from definition to every leaf (or to a cycle re-entry).
+  const outgoing = new Map();
+  edges.forEach((e) => {
+    if (!outgoing.has(e.sourceNodeId)) outgoing.set(e.sourceNodeId, []);
+    outgoing.get(e.sourceNodeId).push(e);
+  });
+
+  const paths = [];
+  const dfsStackLimit = 4000; // generous safety limit
+  let dfsSteps = 0;
+  function dfs(currentId, pathAcc, visitedInPath) {
+    if (++dfsSteps > dfsStackLimit) return;
+    const outs = outgoing.get(currentId) || [];
+    if (outs.length === 0) {
+      paths.push([...pathAcc, { nodeId: currentId, portToNext: null }]);
+      return;
+    }
+    if (visitedInPath.has(currentId)) {
+      paths.push([...pathAcc, { nodeId: currentId, portToNext: null }]);
+      return;
+    }
+    visitedInPath.add(currentId);
+    for (const e of outs) {
+      pathAcc.push({ nodeId: currentId, portToNext: e.sourceAnswerId || null });
+      dfs(e.targetNodeId, pathAcc, visitedInPath);
+      pathAcc.pop();
+    }
+    visitedInPath.delete(currentId);
+  }
+  dfs(definition.id, [], new Set());
+
+  // ── 3) Rebuild each path: decisions in original order, then actions in original order.
+  //      Decisions shared by id; actions cloned per path with deterministic suffix.
+  const sharedDecisions = new Map(); // id -> node
+  const actionClones = []; // cloned ACTION/PEOPLE node copies
+  const finalEdges = [];
+  const edgeKeySeen = new Set();
+
+  function pushEdge(sourceId, sourceAnswerId, targetId) {
+    const key = `${sourceId}|${sourceAnswerId || ''}|${targetId}`;
+    if (edgeKeySeen.has(key)) return;
+    edgeKeySeen.add(key);
+    finalEdges.push({
+      id: id('edge'),
+      sourceNodeId: sourceId,
+      sourceAnswerId: sourceAnswerId || null,
+      targetNodeId: targetId,
+      isDeletable: true,
+    });
+  }
+
+  function deepClone(orig, newId) {
+    const c = { ...orig, id: newId };
+    if (orig && orig.content && typeof orig.content === 'object') {
+      c.content = { ...orig.content };
+      if (Array.isArray(orig.content.materials)) {
+        c.content.materials = orig.content.materials.map((m) => ({ ...m }));
+      }
+    }
+    if (Array.isArray(orig.answers)) c.answers = orig.answers.map((a) => ({ ...a }));
+    return c;
+  }
+
+  paths.forEach((path, pathIdx) => {
+    const decisions = [];
+    const actions = [];
+    for (const step of path) {
+      const node = byId.get(step.nodeId);
+      if (!node) continue;
+      if (node.type === NodeType.DEFINITION) continue;
+      if (isDecision(node.type)) decisions.push({ nodeId: step.nodeId, portToNext: step.portToNext });
+      else if (isAction(node.type)) actions.push({ origNodeId: step.nodeId, portToNext: step.portToNext });
+    }
+
+    decisions.forEach((d) => {
+      if (!sharedDecisions.has(d.nodeId) && byId.has(d.nodeId)) {
+        sharedDecisions.set(d.nodeId, byId.get(d.nodeId));
+      }
+    });
+
+    const clonedActionSteps = actions.map((a, i) => {
+      const orig = byId.get(a.origNodeId);
+      const cloneId = `${orig.id}__p${pathIdx}_${i}`;
+      const clone = deepClone(orig, cloneId);
+      actionClones.push(clone);
+      return { nodeId: cloneId };
+    });
+
+    const seq = [
+      { nodeId: definition.id, type: NodeType.DEFINITION, portToNext: null },
+      ...decisions.map((d) => ({ nodeId: d.nodeId, type: NodeType.DECISION, portToNext: d.portToNext })),
+      ...clonedActionSteps.map((a) => ({ nodeId: a.nodeId, type: 'ACTION_CLONE', portToNext: null })),
+    ];
+
+    for (let i = 0; i < seq.length - 1; i++) {
+      const from = seq[i];
+      const to = seq[i + 1];
+      const sourceAnswerId = from.type === NodeType.DECISION ? from.portToNext : null;
+      pushEdge(from.nodeId, sourceAnswerId, to.nodeId);
+    }
+  });
+
+  // ── 4) Assemble final node list: definition + shared decisions + action clones + orphans.
+  const placedIds = new Set([definition.id]);
+  sharedDecisions.forEach((_, k) => placedIds.add(k));
+  // Mark every ORIGINAL action/people id that participated in any path — these are replaced
+  // by clones, so they should NOT survive in the final graph.
+  const replacedOrigIds = new Set();
+  paths.forEach((path) => {
+    for (const step of path) {
+      const n = byId.get(step.nodeId);
+      if (n && isAction(n.type)) replacedOrigIds.add(step.nodeId);
+    }
+  });
+
+  const orphans = nodes.filter(
+    (n) => !placedIds.has(n.id) && !replacedOrigIds.has(n.id) && n.type !== NodeType.DEFINITION
+  );
+
+  const finalNodes = [
+    definition,
+    ...Array.from(sharedDecisions.values()),
+    ...actionClones,
+    ...orphans,
+  ];
+
+  return {
+    graph: { ...graph, nodes: finalNodes, edges: finalEdges },
+    changed: true,
+    violations,
+    pathCount: paths.length,
+    cloneCount: actionClones.length,
+  };
 }
 
 function normalizeAiGraph(raw, input) {
