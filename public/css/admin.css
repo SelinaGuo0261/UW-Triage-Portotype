@@ -210,7 +210,7 @@ input, textarea { font-family: inherit; color: inherit; }
 .node-badge.action { background: oklch(0.94 0.04 155); color: oklch(0.38 0.12 155); }
 .node-badge.start { background: var(--ink-200); color: var(--ink-700); }
 .node-badge.publish { background: oklch(0.93 0.06 45); color: oklch(0.42 0.14 45); }
-.node-badge.people { background: oklch(0.91 0.06 220); color: oklch(0.34 0.14 220); }
+.node-badge.handler { background: oklch(0.91 0.06 220); color: oklch(0.34 0.14 220); }
 .node-badge.definition { background: oklch(0.92 0.05 200); color: oklch(0.32 0.12 200); }
 .node.people-hidden { border: 2px dashed var(--ink-300) !important; box-shadow: none !important; background: oklch(0.985 0.004 290) !important; }
 .people-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }

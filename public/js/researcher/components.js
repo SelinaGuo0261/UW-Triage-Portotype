@@ -13,8 +13,8 @@ function collectTrailFromNode(startNode, edges, nodeById) {
     visited.add(current.id);
     if (current.type === "ACTION") {
       trail.push({ type: "action", node: current });
-    } else if (current.type === "PEOPLE" && !current.content?.hiddenFromResearchers) {
-      trail.push({ type: "contact", node: current });
+    } else if (current.type === "HANDLER" && !current.content?.hiddenFromResearchers) {
+      trail.push({ type: "handler", node: current });
     }
     const outs = edges.filter((e) => e.sourceNodeId === current.id);
     if (!outs.length) break;
@@ -242,12 +242,32 @@ function DocWizard({ doc, initialAnswers, onApply, onCancel }) {
 // steps.jsx — step cards
 // ─────────────────────────────────────────────
 
-function StepCard({ step, idx, total }) {
-  const isContact = step.type === "contact";
-  const label = isContact ? (step.role || "Contact") : (step.office || "Office");
-  const title = isContact ? step.name : step.action;
-  const hasMaterials = !isContact && step.materials?.length > 0;
+// Inline clock icon for handler steps (not in Icon set)
+function ClockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
+      <path d="M7 4v3.2l2 1.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// Separator rendered between consecutive steps of different types
+function StepTransitionDivider({ label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "2px 0" }}>
+      <div style={{ flex: 1, height: 1, background: "var(--ink-200)" }} />
+      <Mono style={{ fontSize: 9.5, color: "var(--ink-400)", letterSpacing: 0.8, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+        {label}
+      </Mono>
+      <div style={{ flex: 1, height: 1, background: "var(--ink-200)" }} />
+    </div>
+  );
+}
+
+function ActionStepCard({ step, actionNum, actionTotal }) {
   const [checked, setChecked] = useState(() => new Set());
+  const hasMaterials = step.materials?.length > 0;
 
   function toggleCheck(i) {
     setChecked((prev) => {
@@ -258,30 +278,26 @@ function StepCard({ step, idx, total }) {
   }
 
   return (
-    <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
-
-      {/* Section 1: step header + description */}
+    <div style={{ background: "white", border: "0.5px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+      {/* Header */}
       <div style={{ padding: "16px 20px", display: "flex", alignItems: "flex-start", gap: 14 }}>
-        <div style={{ width: 28, height: 28, borderRadius: 999, background: isContact ? "oklch(0.62 0.12 205)" : "var(--purple-700)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>
-          {String(idx + 1).padStart(2, "0")}
+        <div style={{ width: 28, height: 28, borderRadius: 999, background: "var(--purple-700)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>
+          {String(actionNum).padStart(2, "0")}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-            Step {idx + 1} of {total} · {label}
+            Step {actionNum} of {actionTotal} · {step.office || "Office"}
           </Mono>
-          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ink-900)", marginTop: 4, letterSpacing: -0.2, lineHeight: 1.3 }}>{title}</div>
-          {!isContact && step.description && (
+          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ink-900)", marginTop: 4, letterSpacing: -0.2, lineHeight: 1.3 }}>{step.action}</div>
+          {step.description && (
             <div style={{ marginTop: 8, fontSize: 13, color: "var(--ink-700)", lineHeight: 1.6 }}>{step.description}</div>
-          )}
-          {isContact && step.email && (
-            <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-500)" }}>{step.email}</div>
           )}
         </div>
       </div>
 
-      {/* Section 2: materials checklist (always expanded, aligned with title) */}
+      {/* Materials checklist */}
       {hasMaterials && (
-        <div style={{ borderTop: "1px solid var(--ink-200)", padding: "14px 20px 14px 62px", background: "var(--ink-50)" }}>
+        <div style={{ borderTop: "0.5px solid var(--ink-200)", padding: "14px 20px 14px 62px", background: "var(--ink-50)" }}>
           <Mono style={{ fontSize: 10, color: "var(--ink-500)", letterSpacing: 0.7, textTransform: "uppercase" }}>Materials to prepare</Mono>
           <ul style={{ margin: "10px 0 2px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
             {step.materials.map((m, i) => {
@@ -290,7 +306,6 @@ function StepCard({ step, idx, total }) {
               const hasAttach = mat.attachKind && mat.attachValue;
               return (
                 <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                  {/* Checkbox */}
                   <button
                     onClick={() => toggleCheck(i)}
                     style={{ flexShrink: 0, marginTop: 1, width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${done ? "var(--purple-600)" : "var(--ink-300)"}`, background: done ? "var(--purple-600)" : "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0, transition: "background 120ms, border-color 120ms" }}
@@ -298,20 +313,14 @@ function StepCard({ step, idx, total }) {
                   >
                     {done && <Icon.Check style={{ color: "white", width: 10, height: 10 }} />}
                   </button>
-                  {/* Label */}
                   <span style={{ flex: 1, fontSize: 13, color: done ? "var(--ink-400)" : "var(--ink-900)", lineHeight: 1.45, textDecoration: done ? "line-through" : "none", transition: "color 120ms" }}>
                     {mat.label}
                   </span>
-                  {/* Attachment CTA */}
                   {hasAttach && (
                     mat.attachKind === "url" ? (
-                      <a href={mat.attachValue} target="_blank" rel="noopener noreferrer" title="Open link" style={{ flexShrink: 0, marginTop: 1, color: "var(--purple-600)", display: "flex", alignItems: "center" }}>
-                        <Icon.Link />
-                      </a>
+                      <a href={mat.attachValue} target="_blank" rel="noopener noreferrer" title="Open link" style={{ flexShrink: 0, marginTop: 1, color: "var(--purple-600)", display: "flex", alignItems: "center" }}><Icon.Link /></a>
                     ) : (
-                      <a href={mat.attachValue} download title="Download file" style={{ flexShrink: 0, marginTop: 1, color: "var(--purple-600)", display: "flex", alignItems: "center" }}>
-                        <Icon.Download />
-                      </a>
+                      <a href={mat.attachValue} download title="Download file" style={{ flexShrink: 0, marginTop: 1, color: "var(--purple-600)", display: "flex", alignItems: "center" }}><Icon.Download /></a>
                     )
                   )}
                 </li>
@@ -321,47 +330,94 @@ function StepCard({ step, idx, total }) {
         </div>
       )}
 
-      {/* Section 3: contact point, aligned with title */}
-      <div style={{ borderTop: "1px solid var(--ink-200)", padding: "16px 20px 16px 62px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <Mono style={{ fontSize: 10, color: "var(--ink-400)", letterSpacing: 0.7, textTransform: "uppercase" }}>Contact point</Mono>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      {/* Send-to footer */}
+      <div style={{ borderTop: "0.5px solid var(--ink-200)", padding: "14px 20px 14px 62px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <Mono style={{ fontSize: 10, color: "var(--ink-400)", letterSpacing: 0.7, textTransform: "uppercase" }}>Send to</Mono>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Icon.Person style={{ color: "var(--ink-500)", flexShrink: 0 }} />
-          {isContact && step.email ? (
-            <a href={`mailto:${step.email}`} style={{ fontSize: 13, color: "var(--ink-900)", fontWeight: 500, textDecoration: "none", fontFamily: "inherit" }}>
-              {step.email}
-            </a>
-          ) : (
-            <span style={{ fontSize: 13, color: "var(--ink-900)", fontWeight: 500 }}>{label}</span>
+          <span style={{ fontSize: 13, color: "var(--ink-900)", fontWeight: 500 }}>{step.office || "—"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HandlerStepCard({ step }) {
+  const name = step.name || "Internal reviewer";
+  return (
+    <div style={{ background: "var(--ink-50)", border: "0.5px dashed var(--ink-300)", borderRadius: 8, overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "14px 18px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 999, background: "var(--ink-200)", color: "var(--ink-500)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+          <ClockIcon />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-400)", letterSpacing: 0.6, textTransform: "uppercase" }}>
+            Awaiting internal review
+          </Mono>
+          <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink-800)", marginTop: 3, lineHeight: 1.3 }}>{name}</div>
+          {(step.role || step.email) && (
+            <div style={{ marginTop: 4, fontSize: 12.5, color: "var(--ink-500)", fontWeight: 400 }}>
+              {[step.role, step.email].filter(Boolean).join(" · ")}
+            </div>
           )}
         </div>
       </div>
-
+      {/* Note */}
+      <div style={{ borderTop: "0.5px solid var(--ink-200)", padding: "10px 18px 12px 58px" }}>
+        <span style={{ fontSize: 12.5, color: "var(--ink-500)", lineHeight: 1.55 }}>
+          No action needed from you. {name} will review the materials and reach out if anything is missing.
+        </span>
+      </div>
     </div>
   );
 }
 
 function StepResults({ steps }) {
   const [showAll, setShowAll] = useState(false);
+  const actionTotal = steps.filter((s) => s.type === "action").length;
+
+  // Build display items: steps with separators inserted between type transitions
+  function buildDisplayItems(list) {
+    const items = [];
+    let actionNum = 0;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const prev = list[i - 1];
+      if (prev && prev.type !== s.type) {
+        items.push({
+          kind: "divider",
+          label: s.type === "handler" ? "handed off internally" : "back to you",
+          key: `div-${i}`,
+        });
+      }
+      if (s.type === "action") actionNum++;
+      items.push({ kind: "step", step: s, actionNum, key: `step-${i}` });
+    }
+    return items;
+  }
+
   const visible = showAll ? steps : steps.slice(0, 1);
+  const displayItems = buildDisplayItems(visible);
+  const totalActionCount = actionTotal;
 
   return (
     <div>
-      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 12 }}>
-        {visible.map((s, i) => (
-          <React.Fragment key={i}>
-            <StepCard step={s} idx={i} total={steps.length} />
-            {i < visible.length - 1 && (
-              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: 8 }}>
-                <div style={{ width: 1, height: 12, background: "var(--hairline-2)", marginTop: -6 }} />
-              </div>
-            )}
-          </React.Fragment>
-        ))}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {displayItems.map((item) =>
+          item.kind === "divider" ? (
+            <StepTransitionDivider key={item.key} label={item.label} />
+          ) : item.step.type === "action" ? (
+            <ActionStepCard key={item.key} step={item.step} actionNum={item.actionNum} actionTotal={totalActionCount} />
+          ) : (
+            <HandlerStepCard key={item.key} step={item.step} />
+          )
+        )}
       </div>
 
       {steps.length > 1 && (
         <div style={{ marginTop: 14, padding: "10px 14px", background: "white", border: "1px dashed var(--ink-300)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: 12.5, color: "var(--ink-700)" }}>
             {showAll
               ? `Showing all ${steps.length} steps in this signing flow.`
               : `${steps.length - 1} more step${steps.length - 1 === 1 ? "" : "s"} after this one.`}
@@ -432,7 +488,7 @@ function roDecisionAnswerBlockH(a) {
 
 function roNodeHeight(node) {
   if (node.type === "DEFINITION") return 112;
-  if (node.type === "PEOPLE") return 76;
+  if (node.type === "HANDLER") return 76;
   if (node.type === "ACTION") {
     const mats = Math.min((node.content?.materials || []).length, 4);
     return 82 + (node.content?.assignee ? 20 : 0) + mats * 20;
@@ -468,7 +524,7 @@ function ReadOnlyFlowNode({ node }) {
     DECISION:   { bg: "var(--purple-100)",        color: "var(--purple-800)" },
     ACTION:     { bg: "oklch(0.94 0.04 155)",     color: "oklch(0.38 0.12 155)" },
     DEFINITION: { bg: "oklch(0.92 0.05 200)",     color: "oklch(0.32 0.12 200)" },
-    PEOPLE:     { bg: "oklch(0.91 0.06 220)",     color: "oklch(0.34 0.14 220)" },
+    HANDLER:    { bg: "oklch(0.91 0.06 220)",     color: "oklch(0.34 0.14 220)" },
   };
   const badge = BADGE[node.type] || { bg: "var(--ink-100)", color: "var(--ink-700)" };
   return (
@@ -990,9 +1046,9 @@ function SigningFlowModal({ doc, onClose }) {
           };
         }
         return {
-          type: "contact",
+          type: "handler",
           name: item.node.content?.name || item.node.label,
-          role: item.node.content?.role || "",
+          role: item.node.content?.department || item.node.content?.role || "",
           email: item.node.content?.email || "",
         };
       });
@@ -1028,7 +1084,7 @@ function SigningFlowModal({ doc, onClose }) {
               <div style={{ padding: "10px 14px", background: "rgba(46,109,72,0.06)", border: "1px solid rgba(46,109,72,0.18)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <Pill tone="success"><Icon.Check /> Flow generated</Pill>
-                  <span style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+                  <span style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{steps.filter(s => s.type === "action").length} action step{steps.filter(s => s.type === "action").length === 1 ? "" : "s"}</span>
                 </div>
                 <button onClick={restartFlow} style={{ ...linkBtn, fontSize: 12 }}><Icon.Refresh /> Restart</button>
               </div>
@@ -1148,7 +1204,7 @@ function DocumentTypesIndex({ onPick, docs = [] }) {
     <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
       <div style={{ padding: "32px 40px 56px" }}>
         <div style={{ fontFamily: "var(--font-headline)", fontSize: 26, color: "var(--ink-900)", letterSpacing: -0.4, fontWeight: 700 }}>
-          Which agreement do you need?
+          All agreement types
         </div>
         <div style={{ marginTop: 8, color: "var(--ink-700)", fontSize: 13.5, maxWidth: 640, lineHeight: 1.5 }}>
           Browse the agreements and approvals UW supports. Open a document type to learn what it covers and find a signing flow tailored to your situation.
@@ -1230,7 +1286,7 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
         flexShrink: 0,
       }}>
           <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
-            <Icon.Back /> Which agreement do you need?
+            <Icon.Back /> All agreement types
           </button>
           <span style={{ color: "var(--ink-400)" }}>›</span>
           <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
@@ -1398,7 +1454,7 @@ function DocumentDetail({ docId, onBack, docs = [] }) {
       {/* Breadcrumb bar */}
       <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(255,255,255,0.96)", borderBottom: "1px solid var(--ink-200)", boxShadow: "0 1px 3px rgba(40,20,70,0.04)", padding: "12px 40px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
-          <Icon.Back /> Which agreement do you need?
+          <Icon.Back /> All agreement types
         </button>
         <span style={{ color: "var(--ink-400)" }}>›</span>
         <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>

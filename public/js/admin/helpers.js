@@ -379,10 +379,10 @@ function backendFlowToBuilderGraph(flow) {
         })),
       };
     }
-    if (node.type === 'PEOPLE') {
+    if (node.type === 'HANDLER') {
       return {
         ...base,
-        type: 'people',
+        type: 'handler',
         name: node.content?.name || node.label || 'Contact',
         role: node.content?.department || '',
         email: node.content?.email || '',
@@ -492,7 +492,7 @@ function autoLayoutBuilderGraph(graph) {
     const level = levels.get(current);
     edges.filter((e) => e.from === current).forEach((e) => {
       const target = byId.get(e.to);
-      if (!target || target.type === 'people') return;
+      if (!target || target.type === 'handler') return;
       if (levels.has(e.to)) return;
       levels.set(e.to, level + 1);
       queue.push(e.to);
@@ -502,7 +502,7 @@ function autoLayoutBuilderGraph(graph) {
   levels.forEach((l) => { if (l > maxLevel) maxLevel = l; });
   // Orphans (unreachable from definition) get their own stray column past the rightmost.
   nodes.forEach((n) => {
-    if (n.type === 'people' || n.type === 'definition') return;
+    if (n.type === 'handler' || n.type === 'definition') return;
     if (!levels.has(n.id)) levels.set(n.id, maxLevel + 1);
   });
 
@@ -514,7 +514,7 @@ function autoLayoutBuilderGraph(graph) {
     const result = [];
     const consider = (e) => {
       const t = byId.get(e.to);
-      if (!t || t.type === 'people') return;
+      if (!t || t.type === 'handler') return;
       if (!result.includes(e.to)) result.push(e.to);
     };
     if (node.type === 'decision' && Array.isArray(node.answers)) {
@@ -580,7 +580,7 @@ function autoLayoutBuilderGraph(graph) {
   let strayY = Y_OFFSET;
   positions.forEach((p) => { if (p.y + p.h + ROW_GAP > strayY) strayY = p.y + p.h + ROW_GAP; });
   nodes.forEach((n) => {
-    if (n.type === 'people' || n.type === 'definition' || positions.has(n.id)) return;
+    if (n.type === 'handler' || n.type === 'definition' || positions.has(n.id)) return;
     const x = X_OFFSET + (levels.get(n.id) || (maxLevel + 1)) * COL_W;
     const h = estHeight(n);
     positions.set(n.id, { x, y: strayY, h });
@@ -590,7 +590,7 @@ function autoLayoutBuilderGraph(graph) {
   // ── Phase 5 — PEOPLE nodes (keep saved positions; default to a row below the flow)
   const peopleY = Math.max(strayY, Y_OFFSET + PEOPLE_Y_FALLBACK);
   let peopleIdx = 0;
-  nodes.filter((n) => n.type === 'people').forEach((n) => {
+  nodes.filter((n) => n.type === 'handler').forEach((n) => {
     if (positions.has(n.id)) return;
     const hasSaved = (typeof n.x === 'number' && typeof n.y === 'number' && (n.x !== 0 || n.y !== 0));
     if (hasSaved) {
@@ -650,10 +650,10 @@ function builderGraphToBackendFlow(currentFlow, nodes, edges) {
           }),
         };
       }
-      if (node.type === 'people') {
+      if (node.type === 'handler') {
         return {
           id: node.id,
-          type: 'PEOPLE',
+          type: 'HANDLER',
           label: node.name || 'Contact',
           content: {
             name: node.name || '',
@@ -719,7 +719,7 @@ const nodeHeight = (node) => {
   if (node.type === 'definition') return 300;
   if (node.type === 'action') { const m = ensureMaterialsArray(node.materials).length; return 104 + (node.assignee ? 32 : 0) + 28 + m * 28 + 26; }
   if (node.type === 'publish') return 80;
-  if (node.type === 'people') return node.email ? 104 : 86;
+  if (node.type === 'handler') return node.email ? 138 : 140;
   if (node.type === 'decision') {
     const sum = (node.answers || []).reduce((s, a) => s + decisionSegmentHeight(a), 0);
     return 71 + sum + 30;
@@ -793,7 +793,7 @@ function graphToAssistantContext(graph) {
           })),
         };
       }
-      if (n.type === 'people') {
+      if (n.type === 'handler') {
         return { ...base, name: n.name, role: n.role, email: n.email };
       }
       if (n.type === 'action') {
@@ -837,10 +837,10 @@ function buildAssistantNodeFromPayload(payload, fallbackX, fallbackY) {
     }));
     return { ...base, type: 'decision', title: payload.title || 'New decision?', answers };
   }
-  if (type === 'people') {
+  if (type === 'handler') {
     return {
       ...base,
-      type: 'people',
+      type: 'handler',
       name: payload.name || payload.title || 'Contact',
       role: payload.role || '',
       email: payload.email || '',
@@ -906,7 +906,7 @@ function applyAssistantOperationsToGraph(nodes, edges, operations) {
             }));
           }
           nextNodes[idx] = { ...cur, title: fields.title ?? cur.title, answers };
-        } else if (cur.type === 'people') {
+        } else if (cur.type === 'handler') {
           nextNodes[idx] = {
             ...cur,
             name: fields.name ?? cur.name,
