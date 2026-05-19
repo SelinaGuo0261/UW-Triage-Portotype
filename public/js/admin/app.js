@@ -17,6 +17,8 @@ function App() {
   const [generatedFlowCards, setGeneratedFlowCards] = useState([]);
   const [trashedFlowCards, setTrashedFlowCards] = useState([]);
   const [preview, setPreview] = useState(false);
+  const [trashConfirmCard, setTrashConfirmCard] = useState(null);
+  const [permDeleteConfirmCard, setPermDeleteConfirmCard] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [sidebarDragWidth, setSidebarDragWidth] = useState(null);
@@ -157,9 +159,9 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Publish failed');
       setActiveBackendFlow(data.flow);
-      const graph = backendFlowToBuilderGraph(data.flow);
-      setActiveGraph(graph);
-      setCurrentGraph(graph);
+      // Do NOT call backendFlowToBuilderGraph here — it runs autoLayoutBuilderGraph which
+      // discards user positions. The canvas already has the correct layout in its internal
+      // state; only activeBackendFlow needs updating to reflect the new publishScope.
       setGeneratedFlowCards((cards) => [
         flowToCard(data.flow, 'just now'),
         ...cards.filter((card) => card.id !== data.flow.id),
@@ -193,12 +195,9 @@ function App() {
     }
   }, [activeBackendFlow, flowToCard, pushToast]);
 
-  const handleMoveToTrash = useCallback(async (card) => {
-    const confirmed = window.confirm(`Move "${card.name}" to Trash?${card.status === 'published' ? ' It will be removed from the researcher portal.' : ''}`);
-    if (!confirmed) return;
+  const executeTrashCard = useCallback(async (card) => {
     try {
       if (card.backendFlow) {
-        // AI / backend flow: call the DELETE API, then move to the trash list.
         const res = await fetch(`${API_BASE}/flows/${card.backendFlow.id}`, { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Move to trash failed');
@@ -217,7 +216,6 @@ function App() {
           setPage('library');
         }
       } else {
-        // Scratch / local-only flow: no backend record — remove from state only.
         setGeneratedFlowCards((cards) => cards.filter((item) => item.id !== card.id));
         if (scratchIdRef.current === card.id) {
           scratchIdRef.current = null;
@@ -228,13 +226,45 @@ function App() {
           setPage('library');
         }
       }
-      // Remove the autosave draft from localStorage for both flow types.
       await storageAdapter.remove(resolveFlowStorageKey(card.id));
       pushToast('Moved to Trash');
     } catch (error) {
       pushToast(error.message || 'Move to trash failed');
     }
   }, [activeBackendFlow, flowToCard, pushToast]);
+
+  const handleMoveToTrash = useCallback((card) => {
+    setTrashConfirmCard(card);
+  }, []);
+
+  const handleRestoreFlow = useCallback(async (card) => {
+    if (!card.backendFlow) return;
+    try {
+      const res = await fetch(`${API_BASE}/flows/${card.backendFlow.id}/restore`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Restore failed');
+      setTrashedFlowCards((cards) => cards.filter((item) => item.id !== card.id));
+      setGeneratedFlowCards((cards) => [flowToCard(data.flow, 'just now'), ...cards]);
+      pushToast('Flow restored to library');
+    } catch (error) {
+      pushToast(error.message || 'Restore failed');
+    }
+  }, [flowToCard, pushToast]);
+
+  const executePermanentDelete = useCallback(async (card) => {
+    try {
+      if (card.backendFlow) {
+        const res = await fetch(`${API_BASE}/flows/${card.backendFlow.id}/permanent`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Permanent delete failed');
+      }
+      setTrashedFlowCards((cards) => cards.filter((item) => item.id !== card.id));
+      await storageAdapter.remove(resolveFlowStorageKey(card.id));
+      pushToast('Flow permanently deleted');
+    } catch (error) {
+      pushToast(error.message || 'Permanent delete failed');
+    }
+  }, [pushToast]);
   const handleRenameFlow = useCallback(async (card) => {
     if (!card?.backendFlow) {
       pushToast('Sample flows cannot be renamed');
@@ -312,7 +342,7 @@ function App() {
   const primaryNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <Icon.Dashboard />, count: null },
     { id: 'requests', label: 'Requests', icon: <Icon.Inbox />, count: 24 },
-    { id: 'builder', label: 'Triage Builder', icon: <Icon.Flow />, count: 3 },
+    { id: 'builder', label: 'Triage Builder', icon: <Icon.Flow />, count: generatedFlowCards.length },
     { id: 'messages', label: 'Messages', icon: <Icon.Msg />, count: 5 },
   ];
   const footerNavItems = [
@@ -516,7 +546,11 @@ function App() {
         )}
 
         {activeNav === 'trash' && (
-          <TrashPage flows={trashedFlowCards} />
+          <TrashPage
+            flows={trashedFlowCards}
+            onRestore={handleRestoreFlow}
+            onPermanentlyDelete={(card) => setPermDeleteConfirmCard(card)}
+          />
         )}
 
         {/* ── Canvas editor ── */}
@@ -595,6 +629,23 @@ function App() {
       {/* Modals */}
       <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} collaborators={collaborators} setCollaborators={setCollaborators} toast={pushToast} />
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} issues={issuesData.issues} onPublish={handlePublishFlow} isPublished={isPublished} onUnpublish={handleUnpublishFlow} />
+      <ConfirmModal
+        open={!!trashConfirmCard}
+        title="Move to Trash"
+        message={`Move "${trashConfirmCard?.name}" to Trash?${trashConfirmCard?.status === 'published' ? ' It will be removed from the researcher portal.' : ''}`}
+        confirmLabel="Move to Trash"
+        onConfirm={() => executeTrashCard(trashConfirmCard)}
+        onClose={() => setTrashConfirmCard(null)}
+      />
+      <ConfirmModal
+        open={!!permDeleteConfirmCard}
+        title="Permanently Delete"
+        message={`"${permDeleteConfirmCard?.name}" will be permanently deleted and cannot be recovered. Are you sure?`}
+        confirmLabel="Permanently Delete"
+        danger
+        onConfirm={() => executePermanentDelete(permDeleteConfirmCard)}
+        onClose={() => setPermDeleteConfirmCard(null)}
+      />
 
       {/* Toasts */}
       <div className="toast-wrap">

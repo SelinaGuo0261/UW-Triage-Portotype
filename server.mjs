@@ -45,7 +45,7 @@ const NodeType = {
   DEFINITION: 'DEFINITION',
   DECISION: 'DECISION',
   ACTION: 'ACTION',
-  PEOPLE: 'PEOPLE',
+  HANDLER: 'HANDLER',
 };
 
 function id(prefix) {
@@ -936,7 +936,7 @@ function generateFallbackGraph({ name, sourceFile, sourceText }) {
     },
     {
       id: peopleId,
-      type: NodeType.PEOPLE,
+      type: NodeType.HANDLER,
       label: 'CoMotion contact',
       content: {
         name: 'CoMotion Agreements',
@@ -1409,7 +1409,7 @@ function restructureDecisionsBeforeActions(graph) {
   const definition = nodes.find((n) => n.type === NodeType.DEFINITION);
   if (!definition) return { graph, changed: false, violations: [], pathCount: 0, cloneCount: 0 };
 
-  const isAction = (t) => t === NodeType.ACTION || t === NodeType.PEOPLE;
+  const isAction = (t) => t === NodeType.ACTION || t === NodeType.HANDLER;
   const isDecision = (t) => t === NodeType.DECISION;
 
   // ── 1) Detect violations: any edge where the source has an ACTION/PEOPLE ancestor and the
@@ -1670,7 +1670,7 @@ function validateFlow(flow) {
   for (const node of nodes) {
     const incoming = edges.filter((e) => e.targetNodeId === node.id);
     const outgoing = edges.filter((e) => e.sourceNodeId === node.id);
-    if (![NodeType.DEFINITION, NodeType.PEOPLE].includes(node.type) && incoming.length === 0 && outgoing.length === 0) {
+    if (![NodeType.DEFINITION, NodeType.HANDLER].includes(node.type) && incoming.length === 0 && outgoing.length === 0) {
       warnings.push(`${node.label} has no incoming or outgoing edges (on canvas only).`);
     }
     if ([NodeType.ACTION, NodeType.DECISION].includes(node.type) && incoming.length === 0) {
@@ -1725,14 +1725,14 @@ function validateFlow(flow) {
           emitted.add(key('and'));
           orderErrors.push(`[ERROR] ACTION node "${node.label}" is reached with no DECISION node preceding it on this branch. Add a decision question upstream.`);
         }
-        if (node.type === NodeType.PEOPLE && !node.content?.hiddenFromResearchers && !seenAction && !emitted.has(key('pba'))) {
+        if (node.type === NodeType.HANDLER && !node.content?.hiddenFromResearchers && !seenAction && !emitted.has(key('pba'))) {
           emitted.add(key('pba'));
-          orderErrors.push(`[ERROR] PEOPLE node "${node.label}" appears before any ACTION node on this branch. Contact nodes must follow at least one ACTION.`);
+          orderErrors.push(`[ERROR] HANDLER node "${node.label}" appears before any ACTION node on this branch. Handler nodes must follow at least one ACTION.`);
         }
         const nextSeenDecision = seenDecision || node.type === NodeType.DECISION;
         const nextSeenAction = seenAction || node.type === NodeType.ACTION;
         const outs = edges.filter((e) => e.sourceNodeId === node.id);
-        if (!outs.length && !nextSeenAction && ![NodeType.PEOPLE, NodeType.DEFINITION].includes(node.type) && !emitted.has(key('bat'))) {
+        if (!outs.length && !nextSeenAction && ![NodeType.HANDLER, NodeType.DEFINITION].includes(node.type) && !emitted.has(key('bat'))) {
           emitted.add(key('bat'));
           orderErrors.push(`[ERROR] Branch terminates at "${node.label || node.id}" (${node.type}) without reaching any ACTION node.`);
           return;
@@ -1771,7 +1771,7 @@ function isAnyActionReachable(flow) {
 }
 
 function createSnapshot(flow, scope) {
-  const hiddenPeople = new Set(flow.nodes.filter((n) => n.type === NodeType.PEOPLE && n.content?.hiddenFromResearchers).map((n) => n.id));
+  const hiddenPeople = new Set(flow.nodes.filter((n) => n.type === NodeType.HANDLER && n.content?.hiddenFromResearchers).map((n) => n.id));
   return {
     id: id('snapshot'),
     flowId: flow.id,
@@ -1853,7 +1853,7 @@ TASK:
 {
   "plan": "2-6 sentences in English describing what you will change and where in the flow",
   "operations": [
-    { "op": "add_node", "tempId": "optional_temp_1", "node": { "type": "decision|action|people", "title": "...", "x": number, "y": number, "answers": [{"label":"..."}], "description": "...", "assignee": "...", "name": "...", "role": "...", "email": "..." } },
+    { "op": "add_node", "tempId": "optional_temp_1", "node": { "type": "decision|action|handler", "title": "...", "x": number, "y": number, "answers": [{"label":"..."}], "description": "...", "assignee": "...", "name": "...", "role": "...", "email": "..." } },
     { "op": "update_node", "nodeId": "existing_id", "fields": { "title": "...", "body": "...", "answers": [{"id":"existing_answer_id","label":"..."}] } },
     { "op": "delete_node", "nodeId": "existing_id" },
     { "op": "connect", "from": "node_id_or_tempId", "fromPort": "answer_id_or_out", "to": "node_id_or_tempId" },
@@ -2014,6 +2014,26 @@ async function handleApi(req, res, url) {
     db.publishedSnapshots = db.publishedSnapshots.filter((s) => s.flowId !== flowId);
     await writeDb(db);
     return send(res, 200, { trashed: true, flowId, flow });
+  }
+
+  const restoreMatch = url.pathname.match(/^\/api\/flows\/([^/]+)\/restore$/);
+  if (req.method === 'POST' && restoreMatch) {
+    const flow = db.flows.find((f) => f.id === restoreMatch[1]);
+    if (!flow) return send(res, 404, { error: 'Flow not found.' });
+    flow.trashedAt = undefined;
+    flow.status = FlowStatus.DRAFT;
+    flow.updatedAt = now();
+    await writeDb(db);
+    return send(res, 200, { flow });
+  }
+
+  const permanentDeleteMatch = url.pathname.match(/^\/api\/flows\/([^/]+)\/permanent$/);
+  if (req.method === 'DELETE' && permanentDeleteMatch) {
+    const flowId = permanentDeleteMatch[1];
+    db.flows = db.flows.filter((f) => f.id !== flowId);
+    db.publishedSnapshots = db.publishedSnapshots.filter((s) => s.flowId !== flowId);
+    await writeDb(db);
+    return send(res, 200, { deleted: true, flowId });
   }
 
   const validateMatch = url.pathname.match(/^\/api\/flows\/([^/]+)\/validate$/);

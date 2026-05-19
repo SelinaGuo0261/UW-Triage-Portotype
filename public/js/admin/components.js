@@ -182,12 +182,11 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
         className={`node ${selected ? 'selected' : ''}`}
         style={{ left: node.x, top: node.y, width: NODE_W, borderLeft: '3px solid oklch(0.52 0.12 200)' }}
         onPointerDown={onPointerDown}
-        onContextMenu={(e) => onOpenMenu(e, node.id)}
       >
         <div className="node-head">
           <span className="node-badge definition">Definition</span>
           <span className="node-id">#{node.id.slice(-4)}</span>
-          <button className="node-menu" onClick={(e) => onOpenMenu(e, node.id)}><Icon.Dots /></button>
+          <span className="node-menu" style={{ cursor: 'default', color: 'var(--ink-300)' }} title="This node is locked and cannot be deleted"><Icon.Lock /></span>
         </div>
         <div style={{ padding: '10px 12px 14px' }}>
           <input
@@ -216,10 +215,11 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
     );
   }
 
-  /* ── People node: individual reviewer card ── */
-  if (node.type === 'people') {
+  /* ── Handler node ── */
+  if (node.type === 'handler') {
     const initials = (node.name || 'N').split(' ').map(w => w[0]).join('').slice(0, 2);
     const isHidden = node.hiddenFromResearchers;
+    const fieldStyle = (base) => ({ width: '100%', background: 'none', border: 'none', outline: 'none', padding: 0, fontFamily: 'inherit', ...base });
     return (
       <div
         ref={(el) => onNodeMount?.(node.id, el)}
@@ -228,22 +228,40 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
         onPointerDown={onPointerDown}
         onContextMenu={(e) => onOpenMenu(e, node.id)}
       >
+        <div className="node-head">
+          <span className="node-badge handler">Handler</span>
+          <span className="node-id">#{node.id.slice(-4)}</span>
+          {!readOnly && <button className="node-menu" onClick={(e) => onOpenMenu(e, node.id)}><Icon.Dots /></button>}
+        </div>
         {/* Person card body */}
         <div style={{ padding: '11px 12px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: '50%', background: colorFor(node.name || 'N'), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
             {initials}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.name || 'Unnamed'}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.role || 'Role'}</div>
+            {readOnly
+              ? <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-900)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.name || 'Unnamed'}</div>
+              : <input value={node.name || ''} onChange={(e) => onUpdate({ name: e.target.value })} onPointerDown={(e) => e.stopPropagation()} placeholder="Full name…" style={fieldStyle({ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-900)' })} />
+            }
+            {readOnly
+              ? <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.role || 'Role'}</div>
+              : <input value={node.role || ''} onChange={(e) => onUpdate({ role: e.target.value })} onPointerDown={(e) => e.stopPropagation()} placeholder="Role or department…" style={fieldStyle({ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 2 })} />
+            }
           </div>
-          <button className="node-menu" onClick={(e) => onOpenMenu(e, node.id)} style={{ alignSelf: 'flex-start', marginTop: 2 }}><Icon.Dots /></button>
         </div>
-        {node.email && (
-          <div style={{ padding: '3px 12px 0 58px', fontSize: 11, color: 'var(--ink-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.email}</div>
-        )}
+        {/* Email row */}
+        <div style={{ padding: '3px 12px 0 58px' }}>
+          {readOnly
+            ? (node.email ? <div style={{ fontSize: 11, color: 'var(--ink-400)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.email}</div> : null)
+            : <input value={node.email || ''} onChange={(e) => onUpdate({ email: e.target.value })} onPointerDown={(e) => e.stopPropagation()} placeholder="email@uw.edu" type="email" style={fieldStyle({ fontSize: 11, color: 'var(--ink-400)' })} />
+          }
+        </div>
         {/* Visibility status bar */}
-        <div style={{ margin: '8px 12px 10px', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 5, background: isHidden ? 'var(--ink-100)' : 'var(--purple-50)', border: `1px solid ${isHidden ? 'var(--ink-200)' : 'var(--purple-200)'}` }}>
+        <div
+          style={{ margin: '8px 12px 10px', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 5, background: isHidden ? 'var(--ink-100)' : 'var(--purple-50)', border: `1px solid ${isHidden ? 'var(--ink-200)' : 'var(--purple-200)'}`, cursor: readOnly ? 'default' : 'pointer' }}
+          onClick={() => !readOnly && onUpdate({ hiddenFromResearchers: !isHidden })}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <div style={{ width: 6, height: 6, borderRadius: '50%', background: isHidden ? 'var(--ink-400)' : 'var(--purple-600)', flexShrink: 0 }} />
           <span style={{ fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", color: isHidden ? 'var(--ink-500)' : 'var(--purple-700)', letterSpacing: 0.3, flex: 1 }}>
             {isHidden ? 'Hidden from researchers' : 'Visible to researchers'}
@@ -673,18 +691,18 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
               body: `"${label}" — this ACTION node is reached with no DECISION node preceding it on this branch. Add a decision question upstream.` });
           }
 
-          if (node.type === 'people' && !node.hiddenFromResearchers && !seenAction && !emitted.has(key('pba'))) {
+          if (node.type === 'handler' && !node.hiddenFromResearchers && !seenAction && !emitted.has(key('pba'))) {
             emitted.add(key('pba'));
             issues.push({ id: `iss-order-${node.id}-pba`, level: 'err', nodeId: node.id,
               title: 'Contact before Action',
-              body: `"${label}" — a PEOPLE node appears before any ACTION on this branch. Contact nodes must come after at least one ACTION.` });
+              body: `"${label}" — a HANDLER node appears before any ACTION on this branch. Handler nodes must come after at least one ACTION.` });
           }
 
           const outs = edges.filter(e => e.from === node.id);
           const nextSeenDecision = seenDecision || node.type === 'decision';
           const nextSeenAction = seenAction || node.type === 'action';
 
-          if (!outs.length && !nextSeenAction && !['people', 'definition'].includes(node.type)) {
+          if (!outs.length && !nextSeenAction && !['handler', 'definition'].includes(node.type)) {
             if (!emitted.has(key('bat'))) {
               emitted.add(key('bat'));
               issues.push({ id: `iss-order-${node.id}-bat`, level: 'err', nodeId: node.id,
@@ -705,7 +723,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
 
     const suggestions = [
       { id: 'sug-1', level: 'tip', title: 'Use plain language for decisions', body: 'Consider rephrasing "What document type?" as "What kind of document are we reviewing?" for non-expert users.' },
-      { id: 'sug-2', level: 'tip', title: 'Add a People node for reviewers', body: 'Assign review teams to action steps using a People node so routing is always up to date.' },
+      { id: 'sug-2', level: 'tip', title: 'Add a Handler node for reviewers', body: 'Assign review teams to action steps using a Handler node so routing is always up to date.' },
     ];
     onIssuesChange({ issues, suggestions });
   }, [nodes, edges, onIssuesChange]);
@@ -882,7 +900,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
     if (type === 'decision') setNodes(ns => [...ns, { ...base, type, title: 'New decision?', answers: [{ id: 'a' + Math.random(), label: 'Yes', rationale: '' }, { id: 'a' + Math.random(), label: 'No', rationale: '' }] }]);
     else if (type === 'action') setNodes(ns => [...ns, { ...base, type, title: 'New action', description: 'Describe what happens here.', assignee: 'Unassigned', materials: [] }]);
     else if (type === 'publish') setNodes(ns => [...ns, { ...base, type, title: 'Publish to Portal' }]);
-    else if (type === 'people') setNodes(ns => [...ns, { ...base, type, name: 'New Reviewer', role: 'Role', email: '', hiddenFromResearchers: true }]);
+    else if (type === 'handler') setNodes(ns => [...ns, { ...base, type, name: 'New Handler', role: 'Role', email: '', hiddenFromResearchers: true }]);
     toast(`${type[0].toUpperCase() + type.slice(1)} node added`);
   }, [pan, zoom, snapshot, toast]);
 
@@ -963,7 +981,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
         </svg>
         {/* ── Dashed "hidden from researchers" bounding box ── */}
         {(() => {
-          const hiddenPeople = nodes.filter(n => n.type === 'people' && n.hiddenFromResearchers);
+          const hiddenPeople = nodes.filter(n => n.type === 'handler' && n.hiddenFromResearchers);
           if (hiddenPeople.length === 0) return null;
           const pad = 32;
           const minX = Math.min(...hiddenPeople.map(n => n.x)) - pad;
@@ -1041,7 +1059,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
         {toolbarGroup === 'edit' && (<>
           <button className="tool-btn" onClick={() => addNode('decision')}><Icon.Plus /> Decision</button>
           <button className="tool-btn" onClick={() => addNode('action')}><Icon.Plus /> Action</button>
-          <button className="tool-btn" onClick={() => addNode('people')}><Icon.Plus /> People</button>
+          <button className="tool-btn" onClick={() => addNode('handler')}><Icon.Plus /> Handler</button>
           <div className="tool-divider" />
         </>)}
 
@@ -1088,9 +1106,9 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
               style={{ background: showManagePeople ? 'var(--purple-50)' : undefined, color: showManagePeople ? 'var(--purple-800)' : undefined }}
             ><Icon.People /></button>
             {showManagePeople && (() => {
-              const peopleNodes = nodes.filter(n => n.type === 'people');
+              const peopleNodes = nodes.filter(n => n.type === 'handler');
               return (
-                <div className="manage-people-panel" onClick={(e) => e.stopPropagation()} style={{ width: 360 }}>
+                <div className="manage-people-panel" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} style={{ width: 360 }}>
                   <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--ink-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Icon.People style={{ color: 'var(--purple-700)' }} />
@@ -1098,7 +1116,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
                       <span style={{ fontSize: 11, background: 'var(--purple-100)', color: 'var(--purple-700)', borderRadius: 8, padding: '1px 7px', fontWeight: 600 }}>{peopleNodes.length}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <button onClick={() => addNode('people')} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 5, background: 'var(--purple-700)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}><Icon.Plus /> Add</button>
+                      <button onClick={() => addNode('handler')} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 5, background: 'var(--purple-700)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}><Icon.Plus /> Add</button>
                       <button onClick={() => setShowManagePeople(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-400)', fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
                     </div>
                   </div>
@@ -1110,7 +1128,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
                     {peopleNodes.length === 0 ? (
                       <div style={{ padding: '32px 16px', color: 'var(--ink-500)', fontSize: 13, textAlign: 'center', lineHeight: 1.6 }}>
                         No reviewer nodes yet.<br/>
-                        <span style={{ fontSize: 12, color: 'var(--ink-400)' }}>Click <strong>+ Add</strong> above or use <strong>+ People</strong> on the canvas.</span>
+                        <span style={{ fontSize: 12, color: 'var(--ink-400)' }}>Click <strong>+ Add</strong> above or use <strong>+ Handler</strong> on the canvas.</span>
                       </div>
                     ) : peopleNodes.map((n, i) => (
                       <ManagePeopleRow key={n.id} node={n} isLast={i === peopleNodes.length - 1}
@@ -1133,14 +1151,11 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
         <button className="zoom-btn" onClick={() => { setZoom(1); setPan({ x: 40, y: 40 }); }}><Icon.Fit /></button>
       </div>
 
-      {ctxMenu && (
-        <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+      {ctxMenu && nodes.find(x => x.id === ctxMenu.nodeId)?.type !== 'definition' && (
+        <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
           <div className="ctx-item" onClick={() => { const n = nodes.find(x => x.id === ctxMenu.nodeId); if (n) { snapshot(); const copy = { ...n, id: 'n' + Date.now(), x: n.x + 40, y: n.y + 40, answers: n.answers?.map(a => ({ ...a, id: 'a' + Math.random(), rationaleExpanded: false })) }; setNodes(ns => [...ns, copy]); } setCtxMenu(null); }}><Icon.Copy /> Duplicate <kbd>⌘D</kbd></div>
-          <div className="ctx-item" onClick={() => setCtxMenu(null)}><Icon.Link /> Copy link</div>
           <div className="ctx-divider" />
-          {nodes.find(x => x.id === ctxMenu.nodeId)?.type !== 'definition' && (
-            <div className="ctx-item danger" onClick={() => { deleteNode(ctxMenu.nodeId); setCtxMenu(null); }}><Icon.Trash /> Delete <kbd>⌫</kbd></div>
-          )}
+          <div className="ctx-item danger" onClick={() => { deleteNode(ctxMenu.nodeId); setCtxMenu(null); }}><Icon.Trash /> Delete <kbd>⌫</kbd></div>
         </div>
       )}
     </div>
@@ -1150,7 +1165,7 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
 // ── Preview Panel ────────────────────────────────────────────
 function PreviewPanel({ allNodes, flowTitle }) {
   const defNode = allNodes.find(n => n.type === 'definition');
-  const people = allNodes.filter(n => n.type === 'people');
+  const people = allNodes.filter(n => n.type === 'handler');
   const materials = allNodes
     .filter(n => n.type === 'action')
     .flatMap(n => (n.materials || []).filter(m => m.attachKind && m.attachValue));
@@ -1255,7 +1270,7 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
 
   // ── Flow-level view (nothing selected, or edge selected) ──
   if (!selection || selection.type === 'edge') {
-    const peopleNodes = (allNodes || []).filter(n => n.type === 'people');
+    const peopleNodes = (allNodes || []).filter(n => n.type === 'handler');
     const actionNodes = (allNodes || []).filter(n => n.type === 'action');
     const allMaterials = actionNodes.flatMap(n =>
       (n.materials || []).map(m => ({ ...m, fromAction: n.title }))
@@ -1275,7 +1290,7 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
         <div className="inspect-section">
           <div className="rp-section-label">Related Offices & Contacts · {peopleNodes.length}</div>
           {peopleNodes.length === 0
-            ? <div className="inspect-empty">No People nodes yet. Add contacts on the canvas.</div>
+            ? <div className="inspect-empty">No Handler nodes yet. Add handlers on the canvas.</div>
             : peopleNodes.map(n => (
               <div key={n.id} className="inspect-contact-card">
                 <div className="inspect-avatar" style={{ background: colorFor(n.name) }}>
@@ -1455,7 +1470,7 @@ function InspectSettings({ selection, allNodes, flowDescription, setFlowDescript
     }
 
     // ── People node ──
-    if (n.type === 'people') return (
+    if (n.type === 'handler') return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="inspect-section">
           <div className="rp-section-label">Name</div>
@@ -1912,7 +1927,7 @@ function MiniFlowPreview({ nodes, edges, small = false }) {
   const typeColor = {
     decision:   { fill: 'oklch(0.96 0.025 300)', stroke: 'oklch(0.72 0.10 300)' },
     action:     { fill: 'oklch(0.94 0.04 155)',  stroke: 'oklch(0.62 0.12 155)' },
-    people:     { fill: 'oklch(0.91 0.06 220)',  stroke: 'oklch(0.62 0.12 220)' },
+    handler:    { fill: 'oklch(0.91 0.06 220)',  stroke: 'oklch(0.62 0.12 220)' },
     start:      { fill: 'var(--ink-200)',         stroke: 'var(--ink-400)'       },
     definition: { fill: 'oklch(0.95 0.04 200)',  stroke: 'oklch(0.52 0.12 200)' },
   };
@@ -2531,7 +2546,43 @@ function FlowLibrary({ onOpen, onScratch, toast, onGenerated, onMoveToTrash, onR
   );
 }
 
-function TrashPage({ flows = [] }) {
+function ConfirmModal({ open, title, message, confirmLabel = 'Confirm', danger = false, onConfirm, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>{title}</h3>
+          <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={onClose}><Icon.X /></button>
+        </div>
+        <div className="modal-body">
+          <p style={{ margin: 0, color: 'var(--ink-700)', fontSize: 13, lineHeight: 1.6 }}>{message}</p>
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={() => { onConfirm(); onClose(); }}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrashPage({ flows = [], onRestore, onPermanentlyDelete }) {
+  const [ctxMenu, setCtxMenu] = useState(null);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    document.addEventListener('click', close);
+    document.addEventListener('contextmenu', close);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('contextmenu', close);
+    };
+  }, [ctxMenu]);
+
   return (
     <div className="library-page">
       <div className="library-toolbar">
@@ -2539,14 +2590,23 @@ function TrashPage({ flows = [] }) {
           <h2>Trash</h2>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>
-          Flows moved here are removed from the researcher portal.
+          Flows moved here are removed from the researcher portal. Right-click a flow to restore or permanently delete it.
         </div>
       </div>
       <div className="library-scroll">
         <div className="lib-section-label">Trashed Flows · {flows.length}</div>
         <div className="flows-list">
           {flows.map((f) => (
-            <div key={f.id} className="flow-card-list" style={{ cursor: 'default' }}>
+            <div
+              key={f.id}
+              className="flow-card-list"
+              style={{ cursor: 'context-menu', userSelect: 'none' }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setCtxMenu({ x: e.clientX, y: e.clientY, flow: f });
+              }}
+            >
               <div className="flow-card-list-preview">
                 <MiniFlowPreview nodes={f.nodes} edges={f.edges} small />
               </div>
@@ -2570,6 +2630,22 @@ function TrashPage({ flows = [] }) {
           )}
         </div>
       </div>
+
+      {ctxMenu && (
+        <div
+          className="ctx-menu"
+          style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 9999 }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="ctx-item" onClick={() => { onRestore?.(ctxMenu.flow); setCtxMenu(null); }}>
+            <Icon.RefreshCw /> Restore
+          </div>
+          <div className="ctx-item danger" onClick={() => { onPermanentlyDelete?.(ctxMenu.flow); setCtxMenu(null); }}>
+            <Icon.Trash /> Permanently Delete
+          </div>
+        </div>
+      )}
     </div>
   );
 }
