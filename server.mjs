@@ -1471,6 +1471,50 @@ function validateFlow(flow) {
     warnings.push('No ACTION node is reachable from DEFINITION along edges (other ACTION nodes may still be on the canvas).');
   }
 
+  // Node-order validation: traverse all branch paths and enforce DEFINITION→DECISION(s)→ACTION(s)→PEOPLE(s)
+  if (definition) {
+    const rootEdge = edges.find((e) => e.sourceNodeId === definition.id);
+    if (rootEdge) {
+      const rootNode = nodeById.get(rootEdge.targetNodeId);
+      const orderErrors = [];
+      const emitted = new Set();
+      function checkOrder(node, seenDecision, seenAction, pathIds, visited) {
+        if (!node || visited.has(node.id)) return;
+        const nv = new Set(visited);
+        nv.add(node.id);
+        const path = [...pathIds, node.id];
+        const key = (k) => `${node.id}:${k}`;
+
+        if (node.type === NodeType.DECISION && seenAction && !emitted.has(key('daa'))) {
+          emitted.add(key('daa'));
+          orderErrors.push(`[ERROR] DECISION node "${node.label}" appears after an ACTION node on this branch (path: ${path.map(id => id.slice(-6)).join('→')}). Move this decision before the first ACTION, or restructure as a separate branch.`);
+          return;
+        }
+        if (node.type === NodeType.ACTION && !seenDecision && !emitted.has(key('and'))) {
+          emitted.add(key('and'));
+          orderErrors.push(`[ERROR] ACTION node "${node.label}" is reached with no DECISION node preceding it on this branch. Add a decision question upstream.`);
+        }
+        if (node.type === NodeType.PEOPLE && !node.content?.hiddenFromResearchers && !seenAction && !emitted.has(key('pba'))) {
+          emitted.add(key('pba'));
+          orderErrors.push(`[ERROR] PEOPLE node "${node.label}" appears before any ACTION node on this branch. Contact nodes must follow at least one ACTION.`);
+        }
+        const nextSeenDecision = seenDecision || node.type === NodeType.DECISION;
+        const nextSeenAction = seenAction || node.type === NodeType.ACTION;
+        const outs = edges.filter((e) => e.sourceNodeId === node.id);
+        if (!outs.length && !nextSeenAction && ![NodeType.PEOPLE, NodeType.DEFINITION].includes(node.type) && !emitted.has(key('bat'))) {
+          emitted.add(key('bat'));
+          orderErrors.push(`[ERROR] Branch terminates at "${node.label || node.id}" (${node.type}) without reaching any ACTION node.`);
+          return;
+        }
+        for (const edge of outs) {
+          checkOrder(nodeById.get(edge.targetNodeId), nextSeenDecision, nextSeenAction, path, nv);
+        }
+      }
+      checkOrder(rootNode, false, false, [], new Set());
+      errors.push(...orderErrors);
+    }
+  }
+
   return { errors, warnings };
 }
 

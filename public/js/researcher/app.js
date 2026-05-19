@@ -1,17 +1,13 @@
-function KnowledgeBase({ mode, setMode, publicDocs }) {
+function KnowledgeBase({ mode, publicDocs }) {
   const [docId, setDocId] = useState(null);
-  const [contactKey, setContactKey] = useState(null);
 
-  useEffect(() => { setDocId(null); setContactKey(null); }, [mode]);
-
-  function handleContact(key) { setMode("contacts"); setContactKey(key); }
+  useEffect(() => { setDocId(null); }, [mode]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", background: "var(--canvas-bg)" }}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {mode === "documents" && !docId && <DocumentTypesIndex onPick={setDocId} docs={publicDocs} />}
-        {mode === "documents" && docId && <DocumentDetail docId={docId} docs={publicDocs} onBack={() => setDocId(null)} onContact={handleContact} />}
-        {mode === "contacts" && contactKey && <ContactDetail contactKey={contactKey} onBack={() => setContactKey(null)} />}
+        {mode === "documents" && docId && <DocumentDetail docId={docId} docs={publicDocs} onBack={() => setDocId(null)} />}
       </div>
     </div>
   );
@@ -28,9 +24,10 @@ function StubTab({ name, blurb }) {
 }
 
 function Portal() {
-  const [active, setActive] = useState("Knowledge base");
+  const [active, setActive] = useState("Agreement Guide");
   const [kbMode, setKbMode] = useState("documents");
   const [publicDocs, setPublicDocs] = useState([]);
+  const [showNewRequestModal, setShowNewRequestModal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [sidebarDragWidth, setSidebarDragWidth] = useState(null);
@@ -64,13 +61,9 @@ function Portal() {
 
   function handleSetActive(id) {
     setActive(id);
-    if (id === "Knowledge base") setKbMode("documents");
+    if (id === "Agreement Guide") setKbMode("documents");
   }
 
-  function handleSetKbMode(m) {
-    setKbMode(m);
-    setActive("Knowledge base");
-  }
 
   function handleSidebarResizeStart(e) {
     e.preventDefault();
@@ -120,15 +113,20 @@ function Portal() {
   }, []);
 
   return (
-    <div className="portal-shell" style={{ "--sidebar-w": `${sidebarWidth}px` }}>
-      <TopBar />
-      <LeftSidebar active={active} setActive={handleSetActive} collapsed={sidebarCollapsed} dragging={sidebarDragging} onResizeStart={handleSidebarResizeStart} />
-      <div style={{ gridArea: "main", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-        {active === "Knowledge base" && <KnowledgeBase mode={kbMode} setMode={handleSetKbMode} publicDocs={publicDocs} />}
-        {active === "My requests" && <MyRequestsView docs={publicDocs} />}
-        {active === "Messages" && <StubTab name="Messages" blurb="Threaded conversations with the offices handling your requests. Out of scope for this prototype." />}
+    <React.Fragment>
+      <div className="portal-shell" style={{ "--sidebar-w": `${sidebarWidth}px` }}>
+        <TopBar />
+        <LeftSidebar active={active} setActive={handleSetActive} collapsed={sidebarCollapsed} dragging={sidebarDragging} onResizeStart={handleSidebarResizeStart} onNewRequest={() => setShowNewRequestModal(true)} />
+        <div style={{ gridArea: "main", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+          {active === "Agreement Guide" && <KnowledgeBase mode={kbMode} publicDocs={publicDocs} />}
+          {active === "My requests" && <MyRequestsView docs={publicDocs} />}
+          {active === "Messages" && <StubTab name="Messages" blurb="Threaded conversations with the offices handling your requests. Out of scope for this prototype." />}
+        </div>
       </div>
-    </div>
+      {showNewRequestModal && (
+        <MyRequestsSigningModal docs={publicDocs} onClose={() => setShowNewRequestModal(false)} />
+      )}
+    </React.Fragment>
   );
 }
 

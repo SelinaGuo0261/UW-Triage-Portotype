@@ -121,98 +121,61 @@ const Icon = {
       <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
     </svg>
   ),
+  Person: (p) => (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" {...p}>
+      <circle cx="6.5" cy="4" r="2.3" stroke="currentColor" strokeWidth="1.2"/>
+      <path d="M1.5 11.5c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  ),
+  Link: (p) => (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" {...p}>
+      <path d="M5.5 7.5a3.5 3.5 0 005 0l1.5-1.5a3.5 3.5 0 00-5-5L6 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <path d="M7.5 5.5a3.5 3.5 0 00-5 0L1 7a3.5 3.5 0 005 5L7 11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  ),
 };
 
-const CONTACTS = {
-  osp_industry: {
-    name: "Sasha Lindgren, JD",
-    role: "Industry Contracts Lead",
-    dept: "Office of Sponsored Programs",
-    email: "slindgren@uw.edu",
-    phone: "(206) 685-7331",
-    office: "Roosevelt Commons West, Floor 4",
-    hours: "Mon–Fri, 9:00–5:00",
-    handles: ["Industry-sponsored DUAs", "Material Transfer Agreements", "IP / publication clauses"],
-  },
-  osp_intake: {
-    name: "Marcela Quintero, MPH",
-    role: "Pre-Award Intake Specialist",
-    dept: "Office of Sponsored Programs",
-    email: "mquintero@uw.edu",
-    phone: "(206) 543-0098",
-    office: "Roosevelt Commons West, Floor 4",
-    hours: "Mon–Thu, 9:00–4:00",
-    handles: ["Sponsored research intake", "Proposal routing", "Federal pre-award"],
-  },
-  comotion_lic: {
-    name: "Daniel Osei",
-    role: "Licensing Officer — Life Sciences",
-    dept: "CoMotion (Innovation & Tech Transfer)",
-    email: "dosei@uw.edu",
-    phone: "(206) 543-1126",
-    office: "Fluke Hall, Suite 200",
-    hours: "Mon–Fri, 8:30–4:30",
-    handles: ["MTAs", "Outgoing material transfers", "Biological samples"],
-  },
-  comotion_legal: {
-    name: "Priya Raghavan",
-    role: "CoMotion Legal Counsel",
-    dept: "CoMotion (Innovation & Tech Transfer)",
-    email: "praghav@uw.edu",
-    phone: "(206) 685-2412",
-    office: "Fluke Hall, Suite 200",
-    hours: "Mon–Fri, 9:00–5:00",
-    handles: ["NDAs / CDAs", "Confidentiality reviews", "Pre-engagement disclosures"],
-  },
-  ogc: {
-    name: "Hideo Tanaka, JD",
-    role: "Senior Counsel — Research Agreements",
-    dept: "Office of the General Counsel",
-    email: "htanaka@uw.edu",
-    phone: "(206) 543-4043",
-    office: "Gerberding Hall, Suite 360",
-    hours: "Mon–Fri, 9:00–4:00",
-    handles: ["Complex contract review", "Indemnification", "Liability terms"],
-  },
-  privacy: {
-    name: "Allison Park",
-    role: "Privacy Officer — PHI & HIPAA",
-    dept: "UW Medicine Compliance",
-    email: "apark@uw.edu",
-    phone: "(206) 543-3098",
-    office: "Magnuson Health Sciences, K-141",
-    hours: "Mon–Fri, 8:00–5:00",
-    handles: ["PHI sharing", "HIPAA-covered research", "Limited Data Sets"],
-  },
-  global: {
-    name: "Reuben Nakamura",
-    role: "International Research Coordinator",
-    dept: "Office of Global Affairs",
-    email: "rnakamura@uw.edu",
-    phone: "(206) 221-7765",
-    office: "Schmitz Hall, Room 459",
-    hours: "Mon–Thu, 10:00–4:00",
-    handles: ["International collaborations", "Export control review", "Foreign site agreements"],
-  },
-  irb: {
-    name: "Elena Voss",
-    role: "IRB Administrator",
-    dept: "Human Subjects Division",
-    email: "evoss@uw.edu",
-    phone: "(206) 543-0098",
-    office: "Gerberding Hall, Suite 201",
-    hours: "Mon–Fri, 9:00–5:00",
-    handles: ["IRB protocols", "Human subjects review", "Consent materials"],
-  },
-};
+// Build offices dict from snapshot ACTION nodes (unique assignees from first ACTION per branch).
+// Returns { [assignee]: { name } }
+function buildOfficesFromSnapshot(nodes, edges) {
+  const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const definition = nodes.find((n) => n.type === "DEFINITION");
+  const rootEdge = edges.find((e) => e.sourceNodeId === definition?.id);
+  const rootNode = rootEdge ? nodeById[rootEdge.targetNodeId] : null;
+  if (!rootNode) return {};
+  const offices = {};
+  function traverse(node, visited) {
+    if (!node || visited.has(node.id)) return;
+    const nv = new Set(visited);
+    nv.add(node.id);
+    if (node.type === "ACTION") {
+      const assignee = (node.content?.assignee || "").trim();
+      if (assignee && !offices[assignee]) offices[assignee] = { name: assignee };
+      return; // only first ACTION per branch
+    }
+    for (const edge of edges.filter((e) => e.sourceNodeId === node.id)) {
+      traverse(nodeById[edge.targetNodeId], nv);
+    }
+  }
+  traverse(rootNode, new Set());
+  return offices;
+}
 
-const OFFICE_GROUPS = [
-  { title: "CoMotion (Innovation & Tech Transfer)", keys: ["comotion_lic", "comotion_legal"] },
-  { title: "Office of Sponsored Programs", keys: ["osp_intake", "osp_industry"] },
-  { title: "Office of the General Counsel", keys: ["ogc"] },
-  { title: "Human Subjects & Privacy", keys: ["irb", "privacy"] },
-  { title: "Global & International", keys: ["global"] },
-];
+// Build innerContacts dict from snapshot PEOPLE nodes.
+// Returns { [nodeId]: { name, role, email, visible } }
+function buildInnerContacts(nodes) {
+  const contacts = {};
+  for (const n of nodes) {
+    if (n.type !== "PEOPLE") continue;
+    contacts[n.id] = {
+      name: n.content?.name || n.label || "Contact",
+      role: n.content?.role || "",
+      email: n.content?.email || "",
+      visible: !n.content?.hiddenFromResearchers,
+    };
+  }
+  return contacts;
+}
 
 function ContactRow({ icon, label, value, link, borderTop }) {
   const inner = (
@@ -266,14 +229,20 @@ function snapshotToDoc(snapshot) {
   const decisions = nodes.filter((n) => n.type === "DECISION");
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
   const abbrev = (flow.name || "DOC").split(/\s+/).map((w) => w[0]).join("").slice(0, 4).toUpperCase();
+
+  const officesMap = buildOfficesFromSnapshot(nodes, edges);
+  const offices = Object.keys(officesMap);
+  const innerContacts = buildInnerContacts(nodes);
+
   return {
     id: flow.id || snapshot.flowId,
     name: flow.name || "Published Flow",
     abbrev,
     summary: flow.description || definitionContent.description || "",
     definition: definitionContent.description || flow.description || "",
-    offices: ["comotion_legal"],
-    primaryOffice: "comotion_legal",
+    offices,
+    officesMap,
+    innerContacts,
     templates: (definitionContent.templates || []).map((template) => ({
       name: template.label,
       format: template.url ? "Link" : "Pending",
@@ -289,7 +258,6 @@ function snapshotToDoc(snapshot) {
         }),
       })),
       compute(answers) {
-        // 保持原有 compute 不变，供 static DOC_TYPES 的 CustomizePanel 使用
         const steps = [];
         const definitionEdge = edges.find((edge) => edge.sourceNodeId === definition?.id);
         let current = nodeById[definitionEdge?.targetNodeId];
@@ -298,13 +266,26 @@ function snapshotToDoc(snapshot) {
           visited.add(current.id);
           if (current.type === "ACTION") {
             steps.push({
+              type: "action",
               office: current.content?.assignee || "UW CoMotion",
-              contact: "comotion_legal",
               action: current.content?.title || current.label,
-              materials: (current.content?.materials || []).map((material) => material.label),
+              description: current.content?.description || "",
+              materials: (current.content?.materials || []).map((m) => ({ label: m.label, attachKind: m.attachKind || null, attachValue: m.attachValue || "" })).filter((m) => m.label),
             });
             const nextEdge = edges.find((edge) => edge.sourceNodeId === current.id && (edge.sourceAnswerId == null || edge.sourceAnswerId === ""))
               || edges.find((edge) => edge.sourceNodeId === current.id);
+            if (!nextEdge) break;
+            current = nodeById[nextEdge.targetNodeId];
+            continue;
+          }
+          if (current.type === "PEOPLE" && !current.content?.hiddenFromResearchers) {
+            steps.push({
+              type: "contact",
+              name: current.content?.name || current.label,
+              role: current.content?.role || "",
+              email: current.content?.email || "",
+            });
+            const nextEdge = edges.find((edge) => edge.sourceNodeId === current.id);
             if (!nextEdge) break;
             current = nodeById[nextEdge.targetNodeId];
             continue;
@@ -317,7 +298,7 @@ function snapshotToDoc(snapshot) {
         return steps;
       },
     },
-    _snapshot: snapshot,   // ← 新增：供 GraphDocWizard 使用
+    _snapshot: snapshot,
   };
 }
 

@@ -2,20 +2,27 @@
 // GraphDocWizard — 基于图遍历的向导（用于 backend 发布的 flow）
 // ─────────────────────────────────────────────
 
-function graphOutgoingEdges(edges, sourceNodeId) {
-  return edges.filter((e) => e.sourceNodeId === sourceNodeId);
-}
-
-function graphActionHasOutgoing(node, edges) {
-  return Boolean(node && node.type === "ACTION" && graphOutgoingEdges(edges, node.id).length);
-}
-
-function graphFollowActionContinue(node, edges, nodeById) {
-  const outs = graphOutgoingEdges(edges, node.id);
-  if (!outs.length) return null;
-  const preferred = outs.find((e) => e.sourceAnswerId == null || e.sourceAnswerId === "");
-  const edge = preferred || outs[0];
-  return nodeById[edge.targetNodeId] || null;
+// Collect the full post-decision trail starting from startNode.
+// Returns [{ type: "action"|"contact", node }] in graph order.
+// Stops at graph terminals; skips hidden PEOPLE nodes.
+function collectTrailFromNode(startNode, edges, nodeById) {
+  const trail = [];
+  const visited = new Set();
+  let current = startNode;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (current.type === "ACTION") {
+      trail.push({ type: "action", node: current });
+    } else if (current.type === "PEOPLE" && !current.content?.hiddenFromResearchers) {
+      trail.push({ type: "contact", node: current });
+    }
+    const outs = edges.filter((e) => e.sourceNodeId === current.id);
+    if (!outs.length) break;
+    const preferred = outs.find((e) => e.sourceAnswerId == null || e.sourceAnswerId === "");
+    const edge = preferred || outs[0];
+    current = nodeById[edge.targetNodeId] || null;
+  }
+  return trail;
 }
 
 function GraphDocWizard({ snapshot, onResult, onCancel }) {
@@ -30,17 +37,17 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
 
   const [currentNode, setCurrentNode] = React.useState(rootNode);
   const [path, setPath] = React.useState([]);  // { node, answerId }[] — DECISION steps only
-  const [actionTrail, setActionTrail] = React.useState([]); // ACTION chain for Back within ACTION→ACTION
 
+  // If the root node is already an ACTION, immediately emit the trail.
   React.useEffect(() => {
     if (!rootNode || rootNode.type !== "ACTION") return undefined;
-    if (graphActionHasOutgoing(rootNode, edges)) return undefined;
+    const trail = collectTrailFromNode(rootNode, edges, nodeById);
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (!cancelled) onResult(rootNode, []);
+      if (!cancelled) onResult(trail, []);
     });
     return () => { cancelled = true; };
-  }, [rootNode, onResult, edges]);
+  }, [rootNode]);
 
   if (!rootNode) return (
     <div style={{ padding: 20, color: "var(--ink-500)", fontSize: 13 }}>
@@ -48,25 +55,12 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
     </div>
   );
 
-  if (rootNode.type === "ACTION" && !graphActionHasOutgoing(rootNode, edges)) {
+  if (rootNode.type === "ACTION") {
     return (
       <div style={{ padding: 24, color: "var(--ink-600)", fontSize: 13, textAlign: "center" }}>
         Preparing outcome…
       </div>
     );
-  }
-
-  function advanceFromAction() {
-    const next = graphFollowActionContinue(currentNode, edges, nodeById);
-    if (!next) return;
-    if (currentNode.type === "ACTION") {
-      setActionTrail((t) => [...t, currentNode]);
-    }
-    if (next.type === "ACTION" && !graphActionHasOutgoing(next, edges)) {
-      onResult(next, path);
-      return;
-    }
-    setCurrentNode(next);
   }
 
   function pick(answerId) {
@@ -77,92 +71,21 @@ function GraphDocWizard({ snapshot, onResult, onCancel }) {
     if (!nextNode) return;
 
     const newPath = [...path, { node: currentNode, answerId }];
-    setPath(newPath);
-    setActionTrail([]);
 
     if (nextNode.type === "ACTION") {
-      if (graphActionHasOutgoing(nextNode, edges)) {
-        setCurrentNode(nextNode);
-      } else {
-        onResult(nextNode, newPath);
-      }
-    } else {
-      setCurrentNode(nextNode);
+      const trail = collectTrailFromNode(nextNode, edges, nodeById);
+      onResult(trail, newPath);
+      return;
     }
+    setPath(newPath);
+    setCurrentNode(nextNode);
   }
 
   function back() {
-    if (currentNode.type === "DECISION" && path.length === 0 && actionTrail.length > 0) {
-      const prev = actionTrail[actionTrail.length - 1];
-      setActionTrail((t) => t.slice(0, -1));
-      setCurrentNode(prev);
-      return;
-    }
-    if (currentNode.type === "ACTION") {
-      if (actionTrail.length > 0) {
-        const prev = actionTrail[actionTrail.length - 1];
-        setActionTrail((t) => t.slice(0, -1));
-        setCurrentNode(prev);
-        return;
-      }
-      if (path.length === 0) { onCancel(); return; }
-      const prev = path[path.length - 1];
-      setPath(path.slice(0, -1));
-      setCurrentNode(prev.node);
-      return;
-    }
     if (path.length === 0) { onCancel(); return; }
     const prev = path[path.length - 1];
     setPath(path.slice(0, -1));
     setCurrentNode(prev.node);
-  }
-
-  if (currentNode.type === "ACTION") {
-    const title = currentNode.content?.title || currentNode.label || "Step";
-    const desc = currentNode.content?.description || "";
-    const mats = (currentNode.content?.materials || []).map((m) => m.label).filter(Boolean);
-    return (
-      <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
-        <div style={{ padding: "20px 28px 0" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <button onClick={back} style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: "var(--ink-700)", fontSize: 12.5, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
-              <Icon.Back /> {path.length === 0 && actionTrail.length === 0 ? "Cancel" : "Back"}
-            </button>
-            <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.5 }}>
-              ACTION STEP
-            </Mono>
-          </div>
-        </div>
-        <div style={{ padding: "28px 28px 8px" }}>
-          <div style={{ fontFamily: "var(--font-headline)", fontSize: 20, lineHeight: 1.3, color: "var(--ink-900)", letterSpacing: -0.3, fontWeight: 700 }}>
-            {title}
-          </div>
-          {desc && (
-            <div style={{ marginTop: 12, fontSize: 13.5, color: "var(--ink-700)", lineHeight: 1.5 }}>{desc}</div>
-          )}
-          {mats.length > 0 && (
-            <div style={{ marginTop: 14, fontSize: 12.5, color: "var(--ink-600)" }}>
-              <Mono style={{ fontSize: 9, color: "var(--ink-500)" }}>MATERIALS</Mono>
-              <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
-                {mats.slice(0, 6).map((l, i) => <li key={i} style={{ marginBottom: 4 }}>{l}</li>)}
-              </ul>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={advanceFromAction}
-            style={{ marginTop: 22, ...primaryBtn, width: "100%", justifyContent: "center" }}
-          >
-            继续 <Icon.Arrow />
-          </button>
-        </div>
-        <div style={{ marginTop: 12, padding: "12px 28px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)" }}>
-          <div style={{ fontSize: 12, color: "var(--ink-500)" }}>
-            Review this action, then continue to the next step in the flow.
-          </div>
-        </div>
-      </div>
-    );
   }
 
   const stepNum = path.length + 1;
@@ -319,77 +242,105 @@ function DocWizard({ doc, initialAnswers, onApply, onCancel }) {
 // steps.jsx — step cards
 // ─────────────────────────────────────────────
 
-function StepCard({ step, idx, total, onContact, onSituationChange, situationValue }) {
-  const [open, setOpen] = useState(false);
-  const c = CONTACTS[step.contact];
+function StepCard({ step, idx, total }) {
+  const isContact = step.type === "contact";
+  const label = isContact ? (step.role || "Contact") : (step.office || "Office");
+  const title = isContact ? step.name : step.action;
+  const hasMaterials = !isContact && step.materials?.length > 0;
+  const [checked, setChecked] = useState(() => new Set());
+
+  function toggleCheck(i) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  }
 
   return (
     <div style={{ background: "white", border: "1px solid var(--ink-200)", borderRadius: 8, overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
+
+      {/* Section 1: step header + description */}
       <div style={{ padding: "16px 20px", display: "flex", alignItems: "flex-start", gap: 14 }}>
-        <div style={{ width: 28, height: 28, borderRadius: 999, background: "var(--purple-700)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 999, background: isContact ? "oklch(0.62 0.12 205)" : "var(--purple-700)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>
           {String(idx + 1).padStart(2, "0")}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Mono style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-            Step {idx + 1} of {total} · {step.office}
+          <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>
+            Step {idx + 1} of {total} · {label}
           </Mono>
-          <div style={{ fontSize: 16, fontWeight: 500, color: "var(--ink)", marginTop: 3, letterSpacing: -0.1 }}>{step.action}</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ink-900)", marginTop: 4, letterSpacing: -0.2, lineHeight: 1.3 }}>{title}</div>
+          {!isContact && step.description && (
+            <div style={{ marginTop: 8, fontSize: 13, color: "var(--ink-700)", lineHeight: 1.6 }}>{step.description}</div>
+          )}
+          {isContact && step.email && (
+            <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-500)" }}>{step.email}</div>
+          )}
         </div>
       </div>
 
-      {step.situation && (
-        <div style={{ padding: "10px 20px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6, textTransform: "uppercase" }}>Situation</Mono>
-          <span style={{ fontSize: 12.5, color: "var(--ink-700)" }}>{step.situation.label}:</span>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {step.situation.options.map((opt) => {
-              const sel = situationValue === opt.value;
+      {/* Section 2: materials checklist (always expanded, aligned with title) */}
+      {hasMaterials && (
+        <div style={{ borderTop: "1px solid var(--ink-200)", padding: "14px 20px 14px 62px", background: "var(--ink-50)" }}>
+          <Mono style={{ fontSize: 10, color: "var(--ink-500)", letterSpacing: 0.7, textTransform: "uppercase" }}>Materials to prepare</Mono>
+          <ul style={{ margin: "10px 0 2px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+            {step.materials.map((m, i) => {
+              const mat = typeof m === "string" ? { label: m, attachKind: null, attachValue: "" } : m;
+              const done = checked.has(i);
+              const hasAttach = mat.attachKind && mat.attachValue;
               return (
-                <button key={opt.value} onClick={() => onSituationChange(step.situation.branchOf, opt.value)} style={{
-                  padding: "4px 10px", borderRadius: 999,
-                  background: sel ? "var(--purple-700)" : "white",
-                  color: sel ? "white" : "var(--ink-700)",
-                  border: `1px solid ${sel ? "var(--purple-700)" : "var(--ink-200)"}`,
-                  fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
-                }}>{opt.label}</button>
+                <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  {/* Checkbox */}
+                  <button
+                    onClick={() => toggleCheck(i)}
+                    style={{ flexShrink: 0, marginTop: 1, width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${done ? "var(--purple-600)" : "var(--ink-300)"}`, background: done ? "var(--purple-600)" : "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0, transition: "background 120ms, border-color 120ms" }}
+                    title={done ? "Mark as pending" : "Mark as done"}
+                  >
+                    {done && <Icon.Check style={{ color: "white", width: 10, height: 10 }} />}
+                  </button>
+                  {/* Label */}
+                  <span style={{ flex: 1, fontSize: 13, color: done ? "var(--ink-400)" : "var(--ink-900)", lineHeight: 1.45, textDecoration: done ? "line-through" : "none", transition: "color 120ms" }}>
+                    {mat.label}
+                  </span>
+                  {/* Attachment CTA */}
+                  {hasAttach && (
+                    mat.attachKind === "url" ? (
+                      <a href={mat.attachValue} target="_blank" rel="noopener noreferrer" title="Open link" style={{ flexShrink: 0, marginTop: 1, color: "var(--purple-600)", display: "flex", alignItems: "center" }}>
+                        <Icon.Link />
+                      </a>
+                    ) : (
+                      <a href={mat.attachValue} download title="Download file" style={{ flexShrink: 0, marginTop: 1, color: "var(--purple-600)", display: "flex", alignItems: "center" }}>
+                        <Icon.Download />
+                      </a>
+                    )
+                  )}
+                </li>
               );
             })}
-          </div>
-        </div>
-      )}
-
-      {open && (
-        <div style={{ padding: "14px 20px", background: "var(--ink-50)", borderTop: "1px solid var(--ink-200)" }}>
-          <Mono style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: 0.6, textTransform: "uppercase" }}>Materials to prepare</Mono>
-          <ul style={{ margin: "10px 0 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
-            {step.materials.map((m, i) => (
-              <li key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13.5, color: "var(--ink)" }}>
-                <span style={{ color: "var(--ink-3)", marginTop: 1, flexShrink: 0 }}><Icon.Doc /></span>
-                <span>{m}</span>
-              </li>
-            ))}
           </ul>
         </div>
       )}
 
-      <div style={{ padding: "12px 20px", background: "white", borderTop: "1px solid var(--ink-200)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button onClick={() => onContact(step.contact)} style={ghostBtn}>
-          <Icon.Mail /> Contact {c.name.split(" ")[0]}
-        </button>
-        <button onClick={() => setOpen(!open)} style={{ ...ghostBtn, background: open ? "var(--ink-100)" : "white" }}>
-          <Icon.Doc /> Materials to prepare
-          <span style={{ transform: open ? "rotate(180deg)" : "rotate(0)", display: "inline-flex", transition: "transform 150ms" }}>
-            <Icon.Chevron />
-          </span>
-        </button>
-        <div style={{ flex: 1 }} />
-        <Mono style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: 0.5 }}>{c.dept}</Mono>
+      {/* Section 3: contact point, aligned with title */}
+      <div style={{ borderTop: "1px solid var(--ink-200)", padding: "16px 20px 16px 62px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <Mono style={{ fontSize: 10, color: "var(--ink-400)", letterSpacing: 0.7, textTransform: "uppercase" }}>Contact point</Mono>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Icon.Person style={{ color: "var(--ink-500)", flexShrink: 0 }} />
+          {isContact && step.email ? (
+            <a href={`mailto:${step.email}`} style={{ fontSize: 13, color: "var(--ink-900)", fontWeight: 500, textDecoration: "none", fontFamily: "inherit" }}>
+              {step.email}
+            </a>
+          ) : (
+            <span style={{ fontSize: 13, color: "var(--ink-900)", fontWeight: 500 }}>{label}</span>
+          )}
+        </div>
       </div>
+
     </div>
   );
 }
 
-function StepResults({ steps, situationOverrides, onSituationChange, onContact }) {
+function StepResults({ steps }) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? steps : steps.slice(0, 1);
 
@@ -398,12 +349,7 @@ function StepResults({ steps, situationOverrides, onSituationChange, onContact }
       <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 12 }}>
         {visible.map((s, i) => (
           <React.Fragment key={i}>
-            <StepCard
-              step={s} idx={i} total={steps.length}
-              onContact={onContact}
-              onSituationChange={onSituationChange}
-              situationValue={s.situation ? situationOverrides[s.situation.branchOf] : null}
-            />
+            <StepCard step={s} idx={i} total={steps.length} />
             {i < visible.length - 1 && (
               <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: 8 }}>
                 <div style={{ width: 1, height: 12, background: "var(--hairline-2)", marginTop: -6 }} />
@@ -776,9 +722,10 @@ function shortAnswerLabel(text, numWords) {
   return words.slice(0, numWords || 1).join(" ").slice(0, 24);
 }
 
-function pathTabLabel(path, actionNode) {
+function pathTabLabel(path, trail) {
+  const firstAction = trail?.find((t) => t.type === "action")?.node;
   if (!path || !path.length) {
-    const t = actionNode?.content?.title || actionNode?.label || "Path";
+    const t = firstAction?.content?.title || firstAction?.label || "Path";
     return t.length > 30 ? t.slice(0, 28) + "…" : t;
   }
   const labels = path.map((s, i) =>
@@ -794,6 +741,7 @@ function findAllTerminalPaths(nodes, edges) {
   const rootNode = rootEdge ? nodeById[rootEdge.targetNodeId] : null;
   if (!rootNode) return [];
   const results = [];
+  const seenFirstAction = new Set(); // de-duplicate branches that share the same first ACTION
   function traverse(node, cur, visited) {
     if (!node || visited.has(node.id)) return;
     const nv = new Set(visited);
@@ -801,13 +749,12 @@ function findAllTerminalPaths(nodes, edges) {
     const outs = edges.filter((e) => e.sourceNodeId === node.id);
 
     if (node.type === "ACTION") {
-      if (!outs.length) {
-        results.push({ actionNode: node, path: [...cur] });
-        return;
-      }
-      for (const edge of outs) {
-        const next = nodeById[edge.targetNodeId];
-        if (next) traverse(next, cur, nv);
+      // Collect the full trail from this first ACTION and stop recursing.
+      // collectTrailFromNode follows ACTION→ACTION chains and visible PEOPLE nodes.
+      if (!seenFirstAction.has(node.id)) {
+        seenFirstAction.add(node.id);
+        const trail = collectTrailFromNode(node, edges, nodeById);
+        results.push({ trail, path: [...cur] });
       }
       return;
     }
@@ -860,49 +807,54 @@ function SwimlaneStepCard({ num, title, desc, tag, style, materials, borderAccen
   );
 }
 
-function SigningSwimlane({ pathData, allNodes }) {
-  const { actionNode, path } = pathData;
-  const assignee = actionNode.content?.assignee || "Office";
-
-  const peopleNode = allNodes.find((n) => {
-    if (n.type !== "PEOPLE") return false;
-    const al = assignee.toLowerCase();
-    const an = (n.content?.name || "").toLowerCase();
-    const ad = (n.content?.department || "").toLowerCase();
-    const a0 = al.split(/\s+/)[0];
-    const n0 = an.split(/\s+/)[0];
-    const d0 = ad.split(/\s+/)[0];
-    return (n0 && (al.includes(n0) || a0 && an.includes(a0))) ||
-           (d0 && (al.includes(d0) || a0 && ad.includes(a0)));
-  });
+function SigningSwimlane({ pathData }) {
+  const { trail, path } = pathData;
+  const actionItems = trail.filter((t) => t.type === "action");
+  const firstAssignee = actionItems[0]?.node.content?.assignee || "Office";
+  const pathContext = path.map((s) => s.answerText).join(" → ");
 
   const columns = [
     { label: "UW Researcher (PI)", style: SWIMLANE_STYLES.pi },
-    { label: assignee, sub: peopleNode ? `${peopleNode.content?.name}${peopleNode.content?.email ? " · " + peopleNode.content.email : ""}` : null, style: SWIMLANE_STYLES.office },
+    { label: firstAssignee, style: SWIMLANE_STYLES.office },
   ];
 
-  const pathContext = path.map((s) => s.answerText).join(" → ");
-  const materials = (actionNode.content?.materials || []).map((m) => m.label).filter((l) => l && l !== "Material");
+  // Build office rows dynamically from every ACTION node in the trail.
+  // PEOPLE (contact) nodes are informational and shown in the modal, not the swimlane.
+  let stepNum = 2; // 1 = "Submit request"
+  const officeRows = actionItems.map((item, i) => {
+    const node = item.node;
+    const assignee = node.content?.assignee || "Office";
+    const prevAssignee = i > 0 ? (actionItems[i - 1].node.content?.assignee || "Office") : null;
+    const transition = i === 0
+      ? `Received by ${assignee}`
+      : prevAssignee !== assignee
+        ? `Passed to ${assignee}`
+        : "Next step";
+    const mats = (node.content?.materials || []).map((m) => typeof m === "string" ? m : m.label).filter((l) => l && l !== "Material");
+    const row = {
+      transition,
+      cells: [
+        null,
+        { col: 1, num: stepNum, title: node.content?.title || node.label, desc: node.content?.description || "", tag: assignee, style: SWIMLANE_STYLES.office, materials: mats },
+      ],
+    };
+    stepNum++;
+    return row;
+  });
 
   const rows = [
     {
       transition: null,
       cells: [
-        { col: 0, num: 1, title: "Submit request", desc: pathContext ? `Initiate your request. Routing path: ${pathContext.length > 120 ? pathContext.slice(0, 118) + "…" : pathContext}` : "Initiate your request via the signing flow wizard.", tag: "PI initiates", style: SWIMLANE_STYLES.pi },
+        { col: 0, num: 1, title: "Submit request", desc: pathContext ? `Routing path: ${pathContext.length > 120 ? pathContext.slice(0, 118) + "…" : pathContext}` : "Initiate your request via the signing flow wizard.", tag: "PI initiates", style: SWIMLANE_STYLES.pi },
         null,
       ],
     },
-    {
-      transition: `Received by ${assignee}`,
-      cells: [
-        null,
-        { col: 1, num: 2, title: actionNode.content?.title || actionNode.label, desc: actionNode.content?.description || "Review and process the agreement.", tag: assignee, style: SWIMLANE_STYLES.office, materials },
-      ],
-    },
+    ...officeRows,
     {
       transition: "Agreement processed — PI review required",
       cells: [
-        { col: 0, num: 3, title: "Review & acknowledge", desc: "Review the processed agreement. Confirm all terms and provide PI signature or acknowledgment as required by your institution.", tag: "PI reviews", style: SWIMLANE_STYLES.pi },
+        { col: 0, num: stepNum, title: "Review & acknowledge", desc: "Review the processed agreement and confirm all terms.", tag: "PI reviews", style: SWIMLANE_STYLES.pi },
         null,
       ],
     },
@@ -963,7 +915,7 @@ function SigningFlowSteps({ doc, hideLabel }) {
       {allPaths.length > 1 && (
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           {allPaths.map((p, i) => {
-            const label = pathTabLabel(p.path, p.actionNode);
+            const label = pathTabLabel(p.path, p.trail);
             const active = i === safeTab;
             return (
               <button key={i} onClick={() => setActiveTab(i)} style={{
@@ -995,9 +947,9 @@ function SigningFlowSteps({ doc, hideLabel }) {
   );
 }
 
-function SigningFlowModal({ doc, onClose, onContact }) {
+function SigningFlowModal({ doc, onClose }) {
   const [stage, setStage] = useState("questions");
-  const [graphResultNode, setGraphResultNode] = useState(null);
+  const [graphResultTrail, setGraphResultTrail] = useState([]);
   const [graphPath, setGraphPath] = useState([]);
   const [answers, setAnswers] = useState({});
   const [situationOverrides, setSituationOverrides] = useState({});
@@ -1026,16 +978,32 @@ function SigningFlowModal({ doc, onClose, onContact }) {
 
   const steps = useMemo(() => {
     if (stage !== "results") return [];
-    if (isBackendFlow && graphResultNode) {
-      return [{ office: graphResultNode.content?.assignee || "UW CoMotion", contact: "comotion_legal", action: graphResultNode.content?.title || graphResultNode.label, materials: (graphResultNode.content?.materials || []).map((m) => m.label) }];
+    if (isBackendFlow && graphResultTrail.length) {
+      return graphResultTrail.map((item) => {
+        if (item.type === "action") {
+          return {
+            type: "action",
+            office: item.node.content?.assignee || "UW CoMotion",
+            action: item.node.content?.title || item.node.label,
+            description: item.node.content?.description || "",
+            materials: (item.node.content?.materials || []).map((m) => ({ label: m.label, attachKind: m.attachKind || null, attachValue: m.attachValue || "" })).filter((m) => m.label),
+          };
+        }
+        return {
+          type: "contact",
+          name: item.node.content?.name || item.node.label,
+          role: item.node.content?.role || "",
+          email: item.node.content?.email || "",
+        };
+      });
     }
     if (doc?.flow?.compute) return doc.flow.compute({ ...answers, ...situationOverrides });
     return [];
-  }, [stage, answers, situationOverrides, doc, isBackendFlow, graphResultNode]);
+  }, [stage, answers, situationOverrides, doc, isBackendFlow, graphResultTrail]);
 
-  function handleGraphResult(actionNode, path) { setGraphResultNode(actionNode); setGraphPath(path || []); setStage("results"); }
+  function handleGraphResult(trail, path) { setGraphResultTrail(trail || []); setGraphPath(path || []); setStage("results"); }
   function applyAnswers(a) { setAnswers(a); setStage("results"); setSituationOverrides({}); }
-  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultNode(null); setGraphPath([]); }
+  function restartFlow() { setStage("questions"); setAnswers({}); setSituationOverrides({}); setGraphResultTrail([]); setGraphPath([]); }
   function handleBackdropClick(e) { if (e.target === e.currentTarget) onClose(); }
 
   return (
@@ -1064,12 +1032,7 @@ function SigningFlowModal({ doc, onClose, onContact }) {
                 </div>
                 <button onClick={restartFlow} style={{ ...linkBtn, fontSize: 12 }}><Icon.Refresh /> Restart</button>
               </div>
-              <StepResults
-                steps={steps}
-                situationOverrides={situationOverrides}
-                onSituationChange={(key, val) => setSituationOverrides({ ...situationOverrides, [key]: val })}
-                onContact={(key) => { onClose(); onContact(key); }}
-              />
+              <StepResults steps={steps} />
               {customizeQuestions.length > 0 && (
                 <div style={{ marginTop: 24 }}>
                   <CustomizePanel questions={customizeQuestions} answers={customizeAnswers} />
@@ -1087,10 +1050,10 @@ function SigningFlowModal({ doc, onClose, onContact }) {
   );
 }
 
-function MyRequestsSigningModal({ docs, onClose, onContact }) {
+function MyRequestsSigningModal({ docs, onClose }) {
   const [selectedDocId, setSelectedDocId] = useState(null);
   const selectedDoc = docs.find((d) => d.id === selectedDocId);
-  if (selectedDoc) return <SigningFlowModal doc={selectedDoc} onClose={onClose} onContact={onContact} />;
+  if (selectedDoc) return <SigningFlowModal doc={selectedDoc} onClose={onClose} />;
 
   function handleBackdropClick(e) { if (e.target === e.currentTarget) onClose(); }
 
@@ -1167,7 +1130,7 @@ function MyRequestsView({ docs = [], onNavigateKB }) {
         <div style={{ fontSize: 13, maxWidth: 360, textAlign: "center", lineHeight: 1.5 }}>In-flight and submitted document requests across all offices live here. Out of scope for this prototype.</div>
       </div>
       {showModal && (
-        <MyRequestsSigningModal docs={docs} onClose={() => setShowModal(false)} onContact={() => setShowModal(false)} />
+        <MyRequestsSigningModal docs={docs} onClose={() => setShowModal(false)} />
       )}
     </div>
   );
@@ -1185,7 +1148,7 @@ function DocumentTypesIndex({ onPick, docs = [] }) {
     <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
       <div style={{ padding: "32px 40px 56px" }}>
         <div style={{ fontFamily: "var(--font-headline)", fontSize: 26, color: "var(--ink-900)", letterSpacing: -0.4, fontWeight: 700 }}>
-          Document types
+          Which agreement do you need?
         </div>
         <div style={{ marginTop: 8, color: "var(--ink-700)", fontSize: 13.5, maxWidth: 640, lineHeight: 1.5 }}>
           Browse the agreements and approvals UW supports. Open a document type to learn what it covers and find a signing flow tailored to your situation.
@@ -1221,7 +1184,7 @@ function DocumentTypesIndex({ onPick, docs = [] }) {
               <div style={{ fontSize: 12.5, color: "var(--ink-700)", lineHeight: 1.5 }}>{d.summary}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
                 {d.offices.slice(0, 3).map((k) => (
-                  <Pill key={k} tone="soft">{(CONTACTS[k]?.dept || k).replace(/^Office of /, "").replace(/\(.*\)/, "").trim()}</Pill>
+                  <Pill key={k} tone="soft">{(d.officesMap?.[k]?.name || k).replace(/^Office of /, "").replace(/\(.*\)/, "").trim()}</Pill>
                 ))}
               </div>
             </div>
@@ -1267,7 +1230,7 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
         flexShrink: 0,
       }}>
           <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
-            <Icon.Back /> Document types
+            <Icon.Back /> Which agreement do you need?
           </button>
           <span style={{ color: "var(--ink-400)" }}>›</span>
           <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
@@ -1379,7 +1342,7 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
   );
 }
 
-function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
+function DocumentDetail({ docId, onBack, docs = [] }) {
   const doc = docs.find((d) => d.id === docId) || DOC_BY_ID[docId];
   const [showModal, setShowModal] = useState(false);
   const [activeSection, setActiveSection] = useState("description");
@@ -1435,7 +1398,7 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
       {/* Breadcrumb bar */}
       <div style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(255,255,255,0.96)", borderBottom: "1px solid var(--ink-200)", boxShadow: "0 1px 3px rgba(40,20,70,0.04)", padding: "12px 40px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "var(--ink-700)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0, fontFamily: "inherit", fontSize: 12.5 }}>
-          <Icon.Back /> Document types
+          <Icon.Back /> Which agreement do you need?
         </button>
         <span style={{ color: "var(--ink-400)" }}>›</span>
         <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
@@ -1447,6 +1410,7 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
         {/* Section nav — absolutely overlaid, does not affect content width or centering */}
         <div className="doc-secnav-panel">
           <nav className="doc-secnav">
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 400, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-500)", padding: "0 0 8px 14px", whiteSpace: "nowrap" }}>On this page</div>
             {NAV_ITEMS.map(({ id, label }) => {
               const active = id === activeSection;
               return (
@@ -1456,7 +1420,7 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
                   borderLeft: `2px solid ${active ? "var(--purple-600)" : "var(--ink-200)"}`,
                   padding: "6px 0 6px 12px", marginBottom: 2,
                   fontSize: 12.5, fontWeight: active ? 600 : 400,
-                  color: active ? "var(--purple-700)" : "var(--ink-400)",
+                  color: active ? "var(--purple-700)" : "var(--ink600)",
                   cursor: "pointer", fontFamily: "inherit",
                   lineHeight: 1.4, transition: "color 120ms, border-color 120ms",
                 }}>
@@ -1485,21 +1449,24 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
 
             {/* Related Offices */}
             <div id="ksec-offices" ref={reg("offices")} data-sid="offices" style={{ marginTop: 44, scrollMarginTop: 24 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Related Offices</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 8 }}>Related Offices</div>
+              {doc.offices.length > 0 && (
+                <div style={{ fontSize: 14, color: "var(--ink-900)", lineHeight: 1.65, marginBottom: 12 }}>
+                  These are the offices responsible for reviewing and signing this type of agreement. If you're unsure which one applies to your situation, use the signing flow below or contact your department administrator.
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {doc.offices.length === 0 && (
+                  <div style={{ fontSize: 13, color: "var(--ink-500)", fontStyle: "italic" }}>No offices assigned in this flow.</div>
+                )}
                 {doc.offices.map((k) => {
-                  const c = CONTACTS[k];
+                  const o = doc.officesMap?.[k] || { name: k };
                   return (
-                    <div key={k} onClick={() => onContact(k)} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--purple-200)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ink-200)"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
-                    >
-                      <Avatar name={c.name} size={32} />
+                    <div key={k} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, display: "flex", alignItems: "center", gap: 10, boxShadow: "var(--shadow-sm)" }}>
+                      <Avatar name={o.name} size={32} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-900)" }}>{c.dept}</div>
-                        <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>{c.name} · {c.role}</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-900)" }}>{o.name}</div>
                       </div>
-                      <Icon.Arrow />
                     </div>
                   );
                 })}
@@ -1508,7 +1475,12 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
 
             {/* Available Templates */}
             <div id="ksec-templates" ref={reg("templates")} data-sid="templates" style={{ marginTop: 44, scrollMarginTop: 24 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Available Templates</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 8 }}>Available Templates</div>
+              {doc.templates.length > 0 && (
+                <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", marginBottom: 12 }}>
+                  Download official templates for this agreement type. Using the correct template helps avoid delays during review.
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                 {doc.templates.map((t, i) => (
                   <a key={i} href="#" onClick={(e) => e.preventDefault()} style={{ padding: "10px 12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, textDecoration: "none", display: "flex", alignItems: "center", gap: 10, transition: "border-color 120ms, box-shadow 120ms", boxShadow: "var(--shadow-sm)" }}
@@ -1528,7 +1500,10 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
 
             {/* Flowchart Preview */}
             <div id="ksec-flowchart" ref={reg("flowchart")} data-sid="flowchart" style={{ marginTop: 44, scrollMarginTop: 24 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Flowchart Preview</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 8 }}>Flowchart Preview</div>
+              <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", marginBottom: 12 }}>
+                This diagram shows the full routing logic for this agreement type — how decisions are made and where your request may be directed. Use it to orient yourself before stepping through the flow below.
+              </div>
               <FlowchartPreview doc={doc} hideLabel />
             </div>
 
@@ -1540,22 +1515,43 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
 
             {/* Processing Time */}
             <div id="ksec-processing" ref={reg("processing")} data-sid="processing" style={{ marginTop: 44, scrollMarginTop: 24 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 12 }}>Processing Time</div>
-              <div style={{ padding: "12px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, boxShadow: "var(--shadow-sm)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
-                  {[{ label: "1-3 days", pct: 42 }, { label: "3-7 days", pct: 38 }, { label: ">7 days", pct: 20 }].map((item) => (
-                    <div key={item.label}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: "var(--ink-700)" }}>
-                        <span>{item.label}</span>
-                        <Mono style={{ fontSize: 10.5, color: "var(--ink-500)" }}>{item.pct}%</Mono>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.2, marginBottom: 8 }}>Processing Time</div>
+              <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", marginBottom: 12 }}>
+                Typical processing time for this agreement type, based on standard cases. Complex or multi-party agreements may take longer.
+              </div>
+              <div style={{ padding: "18px 20px 16px", background: "white", border: "1px solid var(--ink-200)", borderRadius: 6, boxShadow: "var(--shadow-sm)" }}>
+
+                {/* Typical turnaround */}
+                <Mono style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 400, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-500)" }}>Typical turnaround</Mono>
+                <div style={{ fontFamily: "var(--font-headline)", fontSize: 24, fontWeight: 600, color: "var(--ink-900)", letterSpacing: -0.4, lineHeight: 1.15, marginTop: 12 }}>
+                  3 – 7 Business days
+                </div>
+
+                {/* Hairline */}
+                <div style={{ height: 1, background: "var(--ink-200)", margin: "16px 0" }} />
+
+                {/* How long others waited */}
+                <Mono style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-500)", marginBottom: 10, display: "block" }}>How long others have waited</Mono>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {[
+                    { bucket: "1–3 days", pct: 32 },
+                    { bucket: "3–7 days", pct: 48 },
+                    { bucket: ">7 days",  pct: 20 },
+                  ].map((b) => (
+                    <div key={b.bucket}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "var(--ink-700)", marginBottom: 5 }}>
+                        <span>{b.bucket}</span>
+                        <Mono style={{ fontSize: 11.5, color: "var(--ink-500)" }}>{b.pct}%</Mono>
                       </div>
-                      <div style={{ marginTop: 5, height: 6, background: "var(--ink-100)", borderRadius: 999, overflow: "hidden" }}>
-                        <div style={{ width: `${item.pct}%`, height: "100%", background: "var(--purple-700)", borderRadius: 999 }} />
+                      <div style={{ height: 6, background: "var(--ink-100)", borderRadius: 999, overflow: "hidden" }}>
+                        <div style={{ width: `${b.pct}%`, height: "100%", background: "var(--purple-700)", borderRadius: 999 }} />
                       </div>
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+
+                {/* Footer */}
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--ink-200)", display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ display: "flex", alignItems: "center" }}>
                     {["AP", "JL", "SR"].map((initials, i) => (
                       <div key={initials} style={{ width: 18, height: 18, borderRadius: "50%", background: ["var(--purple-600)", "oklch(0.62 0.14 205)", "oklch(0.66 0.14 145)"][i], color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7.5, fontWeight: 700, marginLeft: i === 0 ? 0 : -5, border: "1.5px solid white", filter: "blur(0.7px)", opacity: 0.8 }}>
@@ -1563,8 +1559,11 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
                       </div>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-500)", fontStyle: "italic" }}>data from real cases</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-500)", fontStyle: "italic" }}>data from 142 real cases</div>
                 </div>
+              </div>
+              <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", marginTop: 12 }}>
+                This estimate begins once your request reaches the responsible office with all required materials. Incomplete submissions will extend this timeline.
               </div>
             </div>
 
@@ -1576,7 +1575,7 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
                   Find a signing flow <Icon.Arrow />
                 </button>
                 <div style={{ fontSize: 13, color: "var(--ink-700)", lineHeight: 1.5 }}>
-                  Answer a few questions to get your personalized routing.
+                  We'll walk you through several short questions about your specific situation, then hand the request off to the right office along with a checklist of what to prepare.
                 </div>
               </div>
             </div>
@@ -1585,7 +1584,7 @@ function DocumentDetail({ docId, onBack, onContact, docs = [] }) {
       </div>
 
       {showModal && (
-        <SigningFlowModal doc={doc} onClose={() => setShowModal(false)} onContact={onContact} />
+        <SigningFlowModal doc={doc} onClose={() => setShowModal(false)} />
       )}
     </div>
   );
@@ -1769,10 +1768,10 @@ function TopBar() {
   );
 }
 
-function LeftSidebar({ active, setActive, collapsed, dragging, onResizeStart }) {
+function LeftSidebar({ active, setActive, collapsed, dragging, onResizeStart, onNewRequest }) {
   const topTabs = [
     { id: "My requests",    icon: NavIcon.Inbox },
-    { id: "Knowledge base", icon: NavIcon.Book  },
+    { id: "Agreement Guide", icon: NavIcon.Book  },
     { id: "Messages",       icon: NavIcon.Chat  },
   ];
   const bottomActions = [
@@ -1784,7 +1783,53 @@ function LeftSidebar({ active, setActive, collapsed, dragging, onResizeStart }) 
   return (
     <div className={`researcher-sidebar ${collapsed ? "researcher-sidebar-collapsed" : ""}`} data-collapsed={collapsed}>
       <div className={`researcher-resize-handle ${dragging ? "dragging" : ""}`} onPointerDown={onResizeStart} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} />
+
+      {/* + New request button */}
+      <div style={{ padding: collapsed ? "10px 8px 4px" : "20px 10px 4px" }}>
+        <button
+          onClick={onNewRequest}
+          title={collapsed ? "New request" : ""}
+          data-tooltip="New request"
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: collapsed ? "center" : "flex-start",
+            gap: 7,
+            padding: collapsed ? "10px 0" : "10px 14px",
+            borderRadius: 7,
+            background: "var(--purple-700)",
+            color: "white",
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 12.5,
+            fontWeight: 600,
+            letterSpacing: "-0.005em",
+            transition: "background 120ms ease, padding 260ms cubic-bezier(0.22,1,0.36,1)",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--purple-800)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--purple-700)"; }}
+        >
+          <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, fontWeight: 400 }}>+</span>
+          <span className="researcher-nav-label">New request</span>
+        </button>
+      </div>
+
       <nav className="researcher-sidebar-main">
+        {/* WORKSPACE section label */}
+        <div style={{ padding: "8px 18px 4px", overflow: "hidden" }}>
+          <span className="researcher-nav-label" style={{
+            fontFamily: "var(--font-subheading)",
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "var(--ink-500)",
+            whiteSpace: "nowrap",
+          }}>Workspace</span>
+        </div>
+
         {topTabs.map(({ id, icon: NavIc }) => {
           const a = id === active;
           return (

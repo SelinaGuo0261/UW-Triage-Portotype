@@ -641,6 +641,68 @@ function FlowCanvas({ onSelectionChange, onIssuesChange, toast, registerAdders, 
         issues.push({ id: `iss-${n.id}-orphan-in`, level: 'warn', nodeId: n.id, title: 'Decision node has no incoming path', body: `"${n.title}" is not wired from upstream (allowed for parallel or draft paths).` });
       }
     });
+
+    // Node-order path traversal: DEFINITION → DECISION(s) → ACTION(s) → PEOPLE(s)
+    // Runs on every graph change to surface ordering errors in real time.
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const defNode = nodes.find(n => n.type === 'definition');
+    if (defNode) {
+      const defOutEdge = edges.find(e => e.from === defNode.id);
+      if (defOutEdge) {
+        const rootNode = nodeMap.get(defOutEdge.to);
+        const emitted = new Set(); // dedup: nodeId:violationCode
+        const checkOrderPath = (node, seenDecision, seenAction, visited) => {
+          if (!node || visited.has(node.id)) return;
+          const nv = new Set(visited);
+          nv.add(node.id);
+          const label = node.title || node.name || node.id;
+          const key = (k) => `${node.id}:${k}`;
+
+          if (node.type === 'decision' && seenAction && !emitted.has(key('daa'))) {
+            emitted.add(key('daa'));
+            issues.push({ id: `iss-order-${node.id}-daa`, level: 'err', nodeId: node.id,
+              title: 'Decision after Action',
+              body: `"${label}" — a DECISION node appears after an ACTION on this branch. Move this decision upstream or restructure as a separate branch.` });
+            return; // stop traversal on this invalid path
+          }
+
+          if (node.type === 'action' && !seenDecision && !emitted.has(key('and'))) {
+            emitted.add(key('and'));
+            issues.push({ id: `iss-order-${node.id}-and`, level: 'err', nodeId: node.id,
+              title: 'Action without Decision gate',
+              body: `"${label}" — this ACTION node is reached with no DECISION node preceding it on this branch. Add a decision question upstream.` });
+          }
+
+          if (node.type === 'people' && !node.hiddenFromResearchers && !seenAction && !emitted.has(key('pba'))) {
+            emitted.add(key('pba'));
+            issues.push({ id: `iss-order-${node.id}-pba`, level: 'err', nodeId: node.id,
+              title: 'Contact before Action',
+              body: `"${label}" — a PEOPLE node appears before any ACTION on this branch. Contact nodes must come after at least one ACTION.` });
+          }
+
+          const outs = edges.filter(e => e.from === node.id);
+          const nextSeenDecision = seenDecision || node.type === 'decision';
+          const nextSeenAction = seenAction || node.type === 'action';
+
+          if (!outs.length && !nextSeenAction && !['people', 'definition'].includes(node.type)) {
+            if (!emitted.has(key('bat'))) {
+              emitted.add(key('bat'));
+              issues.push({ id: `iss-order-${node.id}-bat`, level: 'err', nodeId: node.id,
+                title: 'Branch has no Action',
+                body: `"${label}" — this branch terminates without reaching any ACTION node.` });
+            }
+            return;
+          }
+
+          for (const edge of outs) {
+            const next = nodeMap.get(edge.to);
+            if (next) checkOrderPath(next, nextSeenDecision, nextSeenAction, nv);
+          }
+        };
+        if (rootNode) checkOrderPath(rootNode, false, false, new Set());
+      }
+    }
+
     const suggestions = [
       { id: 'sug-1', level: 'tip', title: 'Use plain language for decisions', body: 'Consider rephrasing "What document type?" as "What kind of document are we reviewing?" for non-expert users.' },
       { id: 'sug-2', level: 'tip', title: 'Add a People node for reviewers', body: 'Assign review teams to action steps using a People node so routing is always up to date.' },

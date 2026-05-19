@@ -228,8 +228,9 @@
     bottom: 0;
     width: 200px;          /* 40px gap from sidebar edge + 160px nav */
     padding-left: 40px;
+    padding-top: 50px;
     display: flex;
-    align-items: center;   /* vertically center nav while content scrolls */
+    align-items: flex-start;
     z-index: 10;
     pointer-events: none;  /* transparent to clicks in the padding / empty area */
   }
