@@ -1300,6 +1300,7 @@ async function generateGraph(input, debugFile2flow = false) {
       description: normalized.description,
       nodes: normalized.nodes,
       edges: normalized.edges,
+      synthesizedNodeTypes: normalized.synthesized || [],
     };
     await writeFile(FILE2FLOW_DEBUG_PATH, `${JSON.stringify(snap, null, 2)}\n`, 'utf8');
   }
@@ -1629,17 +1630,109 @@ function normalizeAiGraph(raw, input) {
       isDeletable: sourceNode?.type !== NodeType.DEFINITION,
     };
   }).filter((e) => e.sourceNodeId && e.targetNodeId);
-  if (!nodes.some((n) => n.type === NodeType.DEFINITION)) {
-    throw new Error('AI response did not include a DEFINITION node.');
+  // ── Backup: don't block flow generation on small structural issues.
+  //    If the AI omitted a required node type, synthesize a minimal valid one
+  //    rather than throwing — the user can refine it in the builder.
+  const synthesized = [];
+
+  let definitionNode = nodes.find((n) => n.type === NodeType.DEFINITION);
+  if (!definitionNode) {
+    definitionNode = {
+      id: id('node'),
+      type: NodeType.DEFINITION,
+      label: input.name || raw.flowName || inferFlowName(input.name, input.sourceFile, input.sourceText),
+      content: {
+        description: raw.description || summarizeText(input.sourceText),
+        relatedOffices: [],
+        templates: [],
+        resources: [],
+      },
+      posX: 0,
+      posY: 0,
+      isDeletable: false,
+      answers: [],
+    };
+    // Wire to a sensible entry: a non-people node with no incoming edges;
+    // prefer DECISION (most flows start with a question), else any candidate.
+    const hasIncoming = new Set(edges.map((e) => e.targetNodeId));
+    const rootCandidates = nodes.filter((n) => !hasIncoming.has(n.id) && n.type !== NodeType.PEOPLE);
+    const entry =
+      rootCandidates.find((n) => n.type === NodeType.DECISION) ||
+      rootCandidates[0] ||
+      nodes.find((n) => n.type !== NodeType.PEOPLE);
+    nodes.unshift(definitionNode);
+    if (entry) {
+      edges.unshift({
+        id: id('edge'),
+        sourceNodeId: definitionNode.id,
+        sourceAnswerId: null,
+        targetNodeId: entry.id,
+        isDeletable: false,
+      });
+    }
+    console.warn(`[file2flow] AI omitted DEFINITION node — auto-synthesized "${definitionNode.label}".`);
+    synthesized.push('DEFINITION');
   }
+
   if (!nodes.some((n) => n.type === NodeType.ACTION)) {
-    throw new Error('AI response did not include an ACTION node.');
+    const placeholder = {
+      id: id('node'),
+      type: NodeType.ACTION,
+      label: 'Action — to be defined',
+      content: {
+        title: 'Action — to be defined',
+        description: 'Auto-generated placeholder; replace with the real action step.',
+        assignee: '',
+        materials: [],
+      },
+      posX: 680,
+      posY: 80,
+      isDeletable: true,
+      answers: [],
+    };
+    // Prefer wiring to a decision answer that has no outgoing edge ("dead branch").
+    const usedAnswerOuts = new Set(
+      edges.filter((e) => e.sourceAnswerId).map((e) => `${e.sourceNodeId}|${e.sourceAnswerId}`)
+    );
+    let wired = false;
+    for (const node of nodes) {
+      if (node.type !== NodeType.DECISION || !Array.isArray(node.answers)) continue;
+      for (const ans of node.answers) {
+        if (!usedAnswerOuts.has(`${node.id}|${ans.id}`)) {
+          edges.push({
+            id: id('edge'),
+            sourceNodeId: node.id,
+            sourceAnswerId: ans.id,
+            targetNodeId: placeholder.id,
+            isDeletable: true,
+          });
+          wired = true;
+          break;
+        }
+      }
+      if (wired) break;
+    }
+    if (!wired) {
+      // No dead decision-answer: hang it directly off the definition.
+      edges.push({
+        id: id('edge'),
+        sourceNodeId: definitionNode.id,
+        sourceAnswerId: null,
+        targetNodeId: placeholder.id,
+        isDeletable: false,
+      });
+    }
+    nodes.push(placeholder);
+    console.warn('[file2flow] AI omitted ACTION node — auto-synthesized placeholder.');
+    synthesized.push('ACTION');
   }
+
   return {
     flowName: raw.flowName || inferFlowName(input.name, input.sourceFile, input.sourceText),
     description: raw.description || summarizeText(input.sourceText),
     nodes,
     edges,
+    synthesized,
   };
 }
 

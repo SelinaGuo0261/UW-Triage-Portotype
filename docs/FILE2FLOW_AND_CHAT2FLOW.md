@@ -149,7 +149,11 @@ sourceText = [desc, fileText].filter(Boolean).join("\n\n")
 ### 3.6 解析、修 JSON、归一化
 
 - 构图输出：`extractJsonCandidate` → `JSON.parse`；失败则 **`05-json-repair.md`** → `repairCommonJsonIssues`；仍失败则 **抛错**（弹窗展示）。
-- **`normalizeAiGraph`**：`tempId` → 持久 `id`，过滤无效边，网格布局；要求至少一个 **DEFINITION** 与一个 **ACTION**。
+- **`normalizeAiGraph`**：`tempId` → 持久 `id`，过滤无效边，网格布局。
+- **缺失节点的兜底**（不阻塞生成）：
+  - 缺 **DEFINITION** → 用 `pipelineInput.name` / `flowName` / 推断标题合成一个，并接到第一个无入边的非 PEOPLE 节点（优先 DECISION）作为入口。
+  - 缺 **ACTION** → 合成占位 `Action — to be defined`，优先接到某个 DECISION 中尚无 outgoing 的 answer 端口；都没有则直接挂在 DEFINITION 下。
+  - 合成事件写入 `console.warn` 与 `step4_normalizedGraph.synthesizedNodeTypes`；UI 不报错，admin 进画布后可手动修正。
 
 ### 3.6b 步骤 5 — 微调顺序（`restructureDecisionsBeforeActions`）
 
@@ -194,7 +198,7 @@ DEFINITION → DECISION* → (ACTION | PEOPLE)*
 | **`step2d_candidatePointCompletion`** | 补全步骤 bundle（或 env 跳过 / 错误） |
 | `step2c_dossierStringInjectedIntoGraphPrompt` | 实际拼进构图 prompt 的 dossier |
 | `step3_*` | 构图 prompt / 原始输出 / 解析 / 修复日志 |
-| `step4_normalizedGraph` | 归一化后的图 |
+| `step4_normalizedGraph` | 归一化后的图；含 `synthesizedNodeTypes: []`（被自动补出的节点类型，如 `["DEFINITION"]`） |
 | **`step5_restructure`** | 微调顺序步骤：`changed` / `violations[]` / `pathCount` / `cloneCount` / `graphAfter`（仅 changed 时含图） |
 
 ### 3.8 环境变量
