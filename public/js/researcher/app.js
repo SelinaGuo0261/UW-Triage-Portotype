@@ -1,0 +1,122 @@
+function KnowledgeBase({ mode, publicDocs }) {
+  const [docId, setDocId] = useState(null);
+
+  useEffect(() => { setDocId(null); }, [mode]);
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", background: "var(--canvas-bg)" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {mode === "documents" && !docId && <DocumentTypesIndex onPick={setDocId} docs={publicDocs} />}
+        {mode === "documents" && docId && <DocumentDetail docId={docId} docs={publicDocs} onBack={() => setDocId(null)} />}
+      </div>
+    </div>
+  );
+}
+
+function Portal() {
+  const [active, setActive] = useState("Agreement Guide");
+  const [kbMode, setKbMode] = useState("documents");
+  const [publicDocs, setPublicDocs] = useState([]);
+  const [showNewRequestModal, setShowNewRequestModal] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarDragging, setSidebarDragging] = useState(false);
+  const [sidebarDragWidth, setSidebarDragWidth] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    async function loadPublicDocs() {
+      try {
+        const listRes = await fetch(`${API_BASE}/knowledge-base`);
+        const listData = await listRes.json();
+        const items = listData.items || [];
+        if (!items.length) return;
+        const snapshots = await Promise.all(items.map(async (item) => {
+          const detailRes = await fetch(`${API_BASE}/knowledge-base/${item.id}`);
+          const detailData = await detailRes.json();
+          return detailData.snapshot;
+        }));
+        if (alive) setPublicDocs(snapshots.filter(Boolean).map(snapshotToDoc));
+      } catch {
+        if (alive) setPublicDocs([]);
+      }
+    }
+    loadPublicDocs();
+    return () => { alive = false; };
+  }, []);
+
+  const sidebarResizeStart = useRef(null);
+  const sidebarDragWidthRef = useRef(null);
+  const sidebarExpandedWidth = 220;
+  const sidebarCollapsedWidth = 56;
+  const sidebarWidth = sidebarDragWidth ?? (sidebarCollapsed ? sidebarCollapsedWidth : sidebarExpandedWidth);
+
+  function handleSetActive(id) {
+    setActive(id);
+    if (id === "Agreement Guide") setKbMode("documents");
+  }
+
+
+  function handleSidebarResizeStart(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    sidebarResizeStart.current = { x: e.clientX, width: sidebarWidth, collapsed: sidebarCollapsed };
+    setSidebarDragging(true);
+    sidebarDragWidthRef.current = sidebarWidth;
+    setSidebarDragWidth(sidebarWidth);
+    document.body.style.cursor = "col-resize";
+
+    const handlePointerMove = (moveEvent) => {
+      const start = sidebarResizeStart.current;
+      if (!start) return;
+      const delta = moveEvent.clientX - start.x;
+      const nextWidth = Math.max(sidebarCollapsedWidth, Math.min(sidebarExpandedWidth, start.width + delta));
+      sidebarDragWidthRef.current = nextWidth;
+      setSidebarDragWidth(nextWidth);
+    };
+
+    const handlePointerUp = (upEvent) => {
+      const start = sidebarResizeStart.current;
+      const finalWidth = sidebarDragWidthRef.current ?? (start ? start.width : sidebarWidth);
+      if (start && Math.abs(upEvent.clientX - start.x) < 8) {
+        setSidebarCollapsed(!start.collapsed);
+      } else {
+        const midpoint = (sidebarExpandedWidth + sidebarCollapsedWidth) / 2;
+        setSidebarCollapsed(finalWidth < midpoint);
+      }
+
+      sidebarResizeStart.current = null;
+      sidebarDragWidthRef.current = null;
+      setSidebarDragging(false);
+      setSidebarDragWidth(null);
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }
+
+  useEffect(() => () => {
+    document.body.style.cursor = "";
+  }, []);
+
+  return (
+    <React.Fragment>
+      <div className="portal-shell" style={{ "--sidebar-w": `${sidebarWidth}px` }}>
+        <TopBar />
+        <LeftSidebar active={active} setActive={handleSetActive} collapsed={sidebarCollapsed} dragging={sidebarDragging} onResizeStart={handleSidebarResizeStart} onNewRequest={() => setShowNewRequestModal(true)} />
+        <div style={{ gridArea: "main", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+          {active === "Agreement Guide" && <KnowledgeBase mode={kbMode} publicDocs={publicDocs} />}
+          {active === "My requests" && <MyRequestsView docs={publicDocs} />}
+        </div>
+      </div>
+      {showNewRequestModal && (
+        <MyRequestsSigningModal docs={publicDocs} onClose={() => setShowNewRequestModal(false)} />
+      )}
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Portal />);
