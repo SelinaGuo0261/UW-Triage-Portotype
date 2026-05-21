@@ -237,6 +237,7 @@ function snapshotToDoc(snapshot) {
   return {
     id: flow.id || snapshot.flowId,
     name: flow.name || "Published Flow",
+    definitionLabel: definition?.label || flow.name || "Published Flow",
     abbrev,
     summary: flow.description || definitionContent.description || "",
     definition: definitionContent.description || flow.description || "",

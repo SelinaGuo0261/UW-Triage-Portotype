@@ -1457,7 +1457,7 @@ function DocumentDetail({ docId, onBack, docs = [] }) {
           <Icon.Back /> All agreement types
         </button>
         <span style={{ color: "var(--ink-400)" }}>›</span>
-        <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.abbrev}</span>
+        <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.definitionLabel || doc.name}</span>
       </div>
 
       {/* Body: scroll area fills full width; nav overlaid via absolute position */}
@@ -1465,21 +1465,26 @@ function DocumentDetail({ docId, onBack, docs = [] }) {
 
         {/* Section nav — absolutely overlaid, does not affect content width or centering */}
         <div className="doc-secnav-panel">
-          <nav className="doc-secnav">
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 400, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-500)", padding: "0 0 8px 14px", whiteSpace: "nowrap" }}>On this page</div>
+          <nav className="doc-secnav" style={{ borderLeft: "2px solid var(--ink-200)" }}>
             {NAV_ITEMS.map(({ id, label }) => {
               const active = id === activeSection;
               return (
                 <button key={id} onClick={() => scrollTo(id)} style={{
                   display: "block", width: "100%", textAlign: "left",
                   background: "none", border: "none",
-                  borderLeft: `2px solid ${active ? "var(--purple-600)" : "var(--ink-200)"}`,
-                  padding: "6px 0 6px 12px", marginBottom: 2,
+                  position: "relative",
+                  padding: "6px 0 6px 12px",
                   fontSize: 12.5, fontWeight: active ? 600 : 400,
                   color: active ? "var(--purple-700)" : "var(--ink600)",
                   cursor: "pointer", fontFamily: "inherit",
-                  lineHeight: 1.4, transition: "color 120ms, border-color 120ms",
+                  lineHeight: 1.4, transition: "color 120ms",
                 }}>
+                  {active && (
+                    <span style={{
+                      position: "absolute", left: -2, top: 0, bottom: 0, width: 2,
+                      background: "var(--purple-600)",
+                    }} />
+                  )}
                   {label}
                 </button>
               );
