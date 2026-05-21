@@ -694,7 +694,7 @@ function FlowchartModal({ doc, onClose }) {
       <div style={{ background: "white", borderRadius: 12, width: "100%", maxWidth: 960, height: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 28px 90px rgba(20,10,40,0.28)", overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--ink-200)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-900)" }}>Flowchart — {doc.name}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-900)" }}>Flowchart — {docDisplayTitle(doc)}</div>
             <div style={{ fontSize: 11.5, color: "var(--ink-500)", marginTop: 1 }}>Read-only · drag to pan · scroll to zoom</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-500)", padding: "4px 8px", borderRadius: 4, fontSize: 20, lineHeight: 1, fontFamily: "inherit" }}>×</button>
@@ -1069,7 +1069,7 @@ function SigningFlowModal({ doc, onClose }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontFamily: "var(--font-headline)", fontSize: 19, fontWeight: 700, color: "var(--ink-900)", letterSpacing: -0.3 }}>Find a signing flow</div>
-              <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 3 }}>{doc.name}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-500)", marginTop: 3 }}>{docDisplayTitle(doc)}</div>
             </div>
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-400)", padding: "4px 8px", borderRadius: 4, fontSize: 20, lineHeight: 1, fontFamily: "inherit" }}>×</button>
           </div>
@@ -1145,7 +1145,7 @@ function MyRequestsSigningModal({ docs, onClose }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink-900)" }}>
                     <Mono style={{ fontSize: 11, color: "var(--purple-700)", marginRight: 6 }}>{doc.abbrev}</Mono>
-                    {doc.name}
+                    {docDisplayTitle(doc)}
                   </div>
                   {doc.summary && <div style={{ fontSize: 12.5, color: "var(--ink-700)", marginTop: 3, lineHeight: 1.45 }}>{doc.summary}</div>}
                 </div>
@@ -1196,7 +1196,7 @@ function DocumentTypesIndex({ onPick, docs = [] }) {
   const [q, setQ] = useState("");
   const filtered = docs.filter((d) => {
     if (!q) return true;
-    const hay = (d.name + " " + d.abbrev + " " + d.summary).toLowerCase();
+    const hay = (docDisplayTitle(d) + " " + d.name + " " + d.abbrev + " " + d.summary).toLowerCase();
     return hay.includes(q.toLowerCase());
   });
 
@@ -1233,7 +1233,7 @@ function DocumentTypesIndex({ onPick, docs = [] }) {
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
                 <div style={{ minWidth: 0 }}>
                   <Mono style={{ fontSize: 10.5, color: "var(--ink-500)", letterSpacing: 0.6 }}>{d.abbrev}</Mono>
-                  <div style={{ fontFamily: "var(--font-headline)", fontSize: 15, fontWeight: 600, color: "var(--ink-900)", marginTop: 2, letterSpacing: -0.2, overflowWrap: "anywhere" }}>{d.name}</div>
+                  <div style={{ fontFamily: "var(--font-headline)", fontSize: 15, fontWeight: 600, color: "var(--ink-900)", marginTop: 2, letterSpacing: -0.2, overflowWrap: "anywhere" }}>{docDisplayTitle(d)}</div>
                 </div>
                 <div style={{ color: "var(--ink-400)" }}><Icon.Arrow /></div>
               </div>
@@ -1296,7 +1296,7 @@ function DocumentDetailPreviousDraft({ docId, onBack, onContact }) {
         <div style={{ flex: "0 0 63%", minWidth: 0, overflowY: "auto", padding: "24px 36px 64px 40px" }}>
           <section>
           <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
-            <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{doc.name}</div>
+            <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{docDisplayTitle(doc)}</div>
             <Pill tone="outline">{doc.abbrev}</Pill>
           </div>
           <div style={{ marginTop: 14, fontSize: 14, lineHeight: 1.65, color: "var(--ink-900)", maxWidth: 600 }}>{doc.definition}</div>
@@ -1457,7 +1457,7 @@ function DocumentDetail({ docId, onBack, docs = [] }) {
           <Icon.Back /> All agreement types
         </button>
         <span style={{ color: "var(--ink-400)" }}>›</span>
-        <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{doc.definitionLabel || doc.name}</span>
+        <span style={{ color: "var(--ink-500)", fontSize: 12 }}>{docDisplayTitle(doc)}</span>
       </div>
 
       {/* Body: scroll area fills full width; nav overlaid via absolute position */}
@@ -1498,7 +1498,7 @@ function DocumentDetail({ docId, onBack, docs = [] }) {
 
             {/* Title */}
             <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
-              <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{doc.name}</div>
+              <div style={{ fontFamily: "var(--font-headline)", fontSize: 30, color: "var(--ink-900)", letterSpacing: -0.5, fontWeight: 700, lineHeight: 1.1 }}>{docDisplayTitle(doc)}</div>
               <Pill tone="outline">{doc.abbrev}</Pill>
             </div>
 

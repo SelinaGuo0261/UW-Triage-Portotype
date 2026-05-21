@@ -191,11 +191,25 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
         <div style={{ padding: '10px 12px 14px' }}>
           <input
             className="node-title-input"
-            style={{ fontFamily: 'var(--font-headline)', fontSize: 17, fontWeight: 700, marginBottom: 10, letterSpacing: '-0.01em', display: 'block', width: '100%' }}
-            value={node.title}
-            onChange={(e) => onUpdate({ title: e.target.value })}
+            style={{ fontFamily: 'var(--font-headline)', fontSize: 17, fontWeight: 700, marginBottom: 8, letterSpacing: '-0.01em', display: 'block', width: '100%' }}
+            value={node.title || ''}
+            onChange={(e) => {
+              const title = e.target.value;
+              const updates = { title };
+              if (!node.abbrevTouched) updates.abbrev = abbrevFromAgreementName(title);
+              onUpdate(updates);
+            }}
             onPointerDown={(e) => e.stopPropagation()}
-            placeholder="Term…"
+            placeholder="Agreement Name"
+            readOnly={readOnly}
+          />
+          <input
+            className="node-title-input"
+            style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 11.5, letterSpacing: '0.04em', color: 'var(--ink-600)', marginBottom: 10, display: 'block', width: '100%' }}
+            value={node.abbrev || ''}
+            onChange={(e) => onUpdate({ abbrev: e.target.value, abbrevTouched: true })}
+            onPointerDown={(e) => e.stopPropagation()}
+            placeholder="Enter the short form, if any"
             readOnly={readOnly}
           />
           <textarea
@@ -204,7 +218,7 @@ function NodeView({ node, selected, onPointerDown, onUpdate, onDelete, onDuplica
             value={node.body || ''}
             onChange={(e) => onUpdate({ body: e.target.value })}
             onPointerDown={(e) => e.stopPropagation()}
-            placeholder="Definition text…"
+            placeholder="Definition of the agreement…"
             rows={10}
             readOnly={readOnly}
           />
@@ -1187,7 +1201,10 @@ function PreviewPanel({ allNodes, flowTitle }) {
           <SectionLabel>Definition</SectionLabel>
           {defNode ? (
             <>
-              <div style={{ fontFamily: 'var(--font-headline)', fontSize: 14, fontWeight: 700, color: 'var(--ink-900)', marginBottom: 6 }}>{defNode.title}</div>
+              <div style={{ fontFamily: 'var(--font-headline)', fontSize: 14, fontWeight: 700, color: 'var(--ink-900)', marginBottom: defNode.abbrev ? 4 : 6 }}>{defNode.title || '—'}</div>
+              {defNode.abbrev && (
+                <div style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10.5, color: 'var(--ink-500)', letterSpacing: '0.05em', marginBottom: 6 }}>{defNode.abbrev}</div>
+              )}
               <p style={{ fontSize: 12.5, lineHeight: 1.7, color: 'var(--ink-700)', margin: 0 }}>{defNode.body}</p>
             </>
           ) : (

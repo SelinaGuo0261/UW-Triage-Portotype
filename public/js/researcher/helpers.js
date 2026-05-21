@@ -217,6 +217,14 @@ function Avatar({ name, size = 38 }) {
 const DOC_TYPES = [];
 
 const DOC_BY_ID = Object.fromEntries(DOC_TYPES.map((d) => [d.id, d]));
+
+function abbrevFromAgreementName(name) {
+  return (name || "DOC").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 4).toUpperCase();
+}
+
+function docDisplayTitle(doc) {
+  return doc?.definitionLabel || doc?.name || "";
+}
 const API_BASE = "/api";
 
 function snapshotToDoc(snapshot) {
@@ -228,7 +236,8 @@ function snapshotToDoc(snapshot) {
   const definitionContent = definition?.content || {};
   const decisions = nodes.filter((n) => n.type === "DECISION");
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
-  const abbrev = (flow.name || "DOC").split(/\s+/).map((w) => w[0]).join("").slice(0, 4).toUpperCase();
+  const abbrev = definitionContent.abbrev
+    || abbrevFromAgreementName(definition?.label || flow.name || "DOC");
 
   const officesMap = buildOfficesFromSnapshot(nodes, edges);
   const offices = Object.keys(officesMap);

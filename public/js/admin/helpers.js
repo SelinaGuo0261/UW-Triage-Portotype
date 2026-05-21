@@ -211,11 +211,17 @@ const colorFor = (s) => {
 const SEED_NODES = [];
 const SEED_EDGES = [];
 
+function abbrevFromAgreementName(name) {
+  return (name || '').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 4).toUpperCase();
+}
+
 const DEFAULT_DEFINITION_NODE = {
   id: 'def-default',
   type: 'definition',
   x: -310, y: 80,
-  title: 'Definition',
+  title: '',
+  abbrev: '',
+  abbrevTouched: false,
   body: '',
   locked: true,
 };
@@ -341,10 +347,16 @@ function backendFlowToBuilderGraph(flow) {
       y: typeof node.posY === 'number' ? node.posY : 0,
     };
     if (node.type === 'DEFINITION') {
+      const title = node.label || flow.name || '';
+      const abbrevTouched = Boolean(node.content?.abbrevTouched);
+      let abbrev = node.content?.abbrev ?? '';
+      if (!abbrevTouched && !abbrev && title) abbrev = abbrevFromAgreementName(title);
       return {
         ...base,
         type: 'definition',
-        title: node.label || flow.name || 'Definition',
+        title,
+        abbrev,
+        abbrevTouched,
         body: node.content?.description || flow.description || '',
         relatedOffices: node.content?.relatedOffices || [],
         templates: node.content?.templates || [],
@@ -623,6 +635,8 @@ function builderGraphToBackendFlow(currentFlow, nodes, edges) {
           label: node.title || currentFlow.name,
           content: {
             description: node.body || '',
+            abbrev: node.abbrev || '',
+            abbrevTouched: Boolean(node.abbrevTouched),
             relatedOffices: node.relatedOffices || [],
             templates: node.templates || [],
             resources: node.resources || [],
@@ -716,7 +730,7 @@ function decisionPortLocalCenterY(node, idx) {
 
 const nodeHeight = (node) => {
   if (node.type === 'start') return 72;
-  if (node.type === 'definition') return 300;
+  if (node.type === 'definition') return 328;
   if (node.type === 'action') { const m = ensureMaterialsArray(node.materials).length; return 104 + (node.assignee ? 32 : 0) + 28 + m * 28 + 26; }
   if (node.type === 'publish') return 80;
   if (node.type === 'handler') return node.email ? 138 : 140;
@@ -780,7 +794,7 @@ function graphToAssistantContext(graph) {
     nodes: nodes.map((n) => {
       const base = { id: n.id, type: n.type, x: n.x, y: n.y };
       if (n.type === 'definition') {
-        return { ...base, title: n.title, body: (n.body || '').slice(0, 800) };
+        return { ...base, title: n.title, abbrev: n.abbrev || '', body: (n.body || '').slice(0, 800) };
       }
       if (n.type === 'decision') {
         return {
